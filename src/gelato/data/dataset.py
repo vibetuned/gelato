@@ -70,7 +70,7 @@ class GelatoDataset(Dataset):
             
         # Load Images
         patches_dir = sample_dir / "patches"
-        patch_files = sorted(list(patches_dir.glob("*.png")), key=lambda p: int(p.stem))
+        patch_files = sorted(list(patches_dir.glob("*.png")), key=lambda p: int(p.stem))[:4] # Force max 4 patches
         
         pixel_values = []
         for p_file in patch_files:
@@ -78,10 +78,8 @@ class GelatoDataset(Dataset):
             # Assume already resized to 512x512
             pixel_values.append(img)
             
-        # If we need exactly 4 patches, ensure that.
-        # For now, let's just take all patches found.
-        # But Model expects [B, Num_Patches, C, H, W]
-        # We need a transform to tensor.
+        # Ensure exactly 4 patches by returning them or padding later
+        # For now, let's pass them to collator to pad exactly up to 4.
         
         return {
             "abc_text": abc_text,
@@ -108,7 +106,7 @@ class GelatoCollator:
         # But first, we need to PAD images if num patches varies.
         
         num_patches_list = [len(l) for l in images_list]
-        max_patches = max(num_patches_list)
+        max_patches = 4 # Enforce exactly 4 patches as per architecture expectations
         
         # Pad images
         padded_images_list = []
@@ -139,6 +137,12 @@ class GelatoCollator:
         c, h, w = pixel_values.shape[-3:]
         pixel_values = pixel_values.view(b, max_patches, c, h, w)
         
+        # Create image attention mask [B, Max_N]
+        # 1 for valid image patch, 0 for padded patch
+        image_attention_mask = torch.zeros((b, max_patches), dtype=torch.long)
+        for i, patches in enumerate(images_list):
+            image_attention_mask[i, :len(patches)] = 1
+        
         # Process Text
         # Format: <B> [ABC] <E>
         formatted_texts = [f"{TOK_START} {t} {TOK_END}" for t in texts]
@@ -151,9 +155,14 @@ class GelatoCollator:
             max_length=self.max_length
         )
         
+        # Replace padding with -100 in labels so it's ignored in loss
+        labels = text_inputs.input_ids.clone()
+        labels[labels == self.tokenizer.pad_token_id] = -100
+
         return {
             "pixel_values": pixel_values,
+            "image_attention_mask": image_attention_mask,
             "input_ids": text_inputs.input_ids,
             "attention_mask": text_inputs.attention_mask,
-            "labels": text_inputs.input_ids # Standard Causal LM training (labels=input_ids)
+            "labels": labels
         }

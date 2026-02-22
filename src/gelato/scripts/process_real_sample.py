@@ -6,7 +6,7 @@ from gelato.data.converter import convert_xml_to_abc
 from gelato.data.renderer import Renderer
 from gelato.data.canonicalize import canonicalize_abc
 
-def process_mxl_sample():
+def main():
     # Input/Output dirs
     mxl_dir = Path("data/mxl_sample")
     processed_dir = Path("data/processed_real")
@@ -92,4 +92,4 @@ def process_mxl_sample():
                 xml_path.unlink()
 
 if __name__ == "__main__":
-    process_mxl_sample()
+    main()

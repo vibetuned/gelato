@@ -23,7 +23,7 @@ class ModelArguments:
 class DataArguments:
     data_dir: str = field(default="./data/processed")
 
-def train():
+def main():
     parser = transformers.HfArgumentParser((ModelArguments, DataArguments, TrainingArguments))
     model_args, data_args, training_args = parser.parse_args_into_dataclasses()
     
@@ -57,6 +57,9 @@ def train():
     collator = GelatoCollator(processor, tokenizer, max_length=model_args.max_seq_len)
     
     # 4. Trainer
+    # Force report_to="aim"
+    training_args.report_to = ["tensorboard"]
+    
     trainer = Trainer(
         model=model,
         args=training_args,
@@ -91,4 +94,4 @@ def train():
         trainer.save_model()
 
 if __name__ == "__main__":
-    train()
+    main()

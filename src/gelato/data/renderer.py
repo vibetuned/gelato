@@ -91,35 +91,31 @@ class Renderer:
         img = Image.open(image_path).convert('RGB')
         w, h = img.size
         
+        # We want exactly ONE segment per input image (max 512x2048).
+        # We need to scale the image proportionally so it fits within 512x2048.
         target_w = 512
-        target_h_segment = 4 * target_w # 2048
+        target_h_max = 4 * target_w # 2048
         
-        # Resize image so width is target_w
-        # Maintain aspect ratio for now
-        scale = target_w / w
+        # Calculate scaling to fit within 512x2048 while maintaining aspect ratio
+        scale_w = target_w / w
+        scale_h = target_h_max / h
+        scale = min(scale_w, scale_h) # Fit within both bounds
+        
+        new_w = int(w * scale)
         new_h = int(h * scale)
-        img_resized = img.resize((target_w, new_h), Image.Resampling.LANCZOS)
         
-        segments = []
+        # Resize image
+        img_resized = img.resize((new_w, new_h), Image.Resampling.LANCZOS)
         
-        # Now cut into 2048px tall segments
-        # If the last segment is short, pad it with white.
-        current_y = 0
-        while current_y < new_h:
-            box = (0, current_y, target_w, current_y + target_h_segment)
-            segment = img_resized.crop(box)
-            
-            # If segment is shorter than target_h_segment, pad it
-            if segment.height < target_h_segment:
-                pad_h = target_h_segment - segment.height
-                new_segment = Image.new("RGB", (target_w, target_h_segment), (255, 255, 255))
-                new_segment.paste(segment, (0, 0))
-                segment = new_segment
-            
-            segments.append(segment)
-            current_y += target_h_segment
-            
-        return segments
+        # Create a blank white canvas of exactly 512x2048
+        canvas = Image.new("RGB", (target_w, target_h_max), (255, 255, 255))
+        
+        # Paste the resized image onto the top-left (or center) of the canvas
+        # Top-left alignment is standard for reading order
+        canvas.paste(img_resized, (0, 0))
+        
+        # Return exactly 1 segment
+        return [canvas]
 
     def slice_segment(self, segment: Image.Image, num_patches: int = 4) -> list[Image.Image]:
         """

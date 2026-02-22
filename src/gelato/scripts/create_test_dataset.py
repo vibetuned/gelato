@@ -123,7 +123,7 @@ def create_dataset(
     shutil.rmtree("data/temp_render") # Clean render temp
     logger.info(f"Created dataset at {output_dir}")
 
-if __name__ == "__main__":
+def main():
     import argparse
     parser = argparse.ArgumentParser()
     parser.add_argument("--tar", default="data/mxl.tar.gz")
@@ -132,3 +132,6 @@ if __name__ == "__main__":
     args = parser.parse_args()
     
     create_dataset(Path(args.tar), Path(args.out), args.num)
+
+if __name__ == "__main__":
+    main()

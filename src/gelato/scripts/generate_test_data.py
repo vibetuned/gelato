@@ -5,7 +5,7 @@ from gelato.data.converter import convert_xml_to_abc
 from gelato.data.renderer import Renderer
 from gelato.data.canonicalize import canonicalize_abc
 
-def create_dummy_sample():
+def main():
     # 1. Create dummy MusicXML
     xml_content = """<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE score-partwise PUBLIC "-//Recordare//DTD MusicXML 3.1 Partwise//EN" "http://www.musicxml.org/dtds/partwise.dtd">
@@ -87,4 +87,4 @@ def create_dummy_sample():
         print(f"Saved {len(patches)} patches to {processed_dir}")
         
 if __name__ == "__main__":
-    create_dummy_sample()
+    main()

@@ -44,3 +44,14 @@ uv pip install -r requirements.txt
     ```
     Done. Success: 174659, Skipped: 50004, Errors: 29372
     ```
+
+    uv run train.py \                                                                                                                               HEAD
+    --data_dir data/processed_train \
+    --output_dir checkpoints/full_run_2 \
+    --num_train_epochs 1 \
+    --per_device_train_batch_size 2 \
+    --gradient_accumulation_steps 2 \
+    --fp16 \
+    --gradient_checkpointing \
+    --save_steps 500 \
+    --max_seq_len 1024

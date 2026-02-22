@@ -10,8 +10,11 @@ from .resampler import PerceiverResampler
 # from ..utils.tokenizer import IMG_TOKEN_ID # Removed dependency on constant ID
 
 
-class GelatoConfig:
+from transformers import PretrainedConfig
+
+class GelatoConfig(PretrainedConfig):
     # Minimal config wrapper
+    model_type = "gelato"
     def __init__(self, 
                  vision_model_name="google/siglip2-large-patch16-512",
                  text_model_name="google/gemma-3-270m",
@@ -19,7 +22,9 @@ class GelatoConfig:
                  resampler_latents=256,
                  resampler_dim=1024, # Match gemma hidden size
                  vision_dim=1152,
-                 max_seq_len=2048):   # Match siglip hidden size
+                 max_seq_len=2048,
+                 **kwargs):   # Match siglip hidden size
+        super().__init__(**kwargs)
         self.vision_model_name = vision_model_name
         self.text_model_name = text_model_name
         self.resampler_depth = resampler_depth
@@ -27,9 +32,21 @@ class GelatoConfig:
         self.resampler_dim = resampler_dim
         self.vision_dim = vision_dim
         self.max_seq_len = max_seq_len
-        
+
     def to_dict(self):
-        return self.__dict__
+        d = super().to_dict()
+        # Ensure our custom fields are included nicely, PretrainedConfig automatically copies self.attr 
+        # but just in case:
+        d.update({
+            "vision_model_name": self.vision_model_name,
+            "text_model_name": self.text_model_name,
+            "resampler_depth": self.resampler_depth,
+            "resampler_latents": self.resampler_latents,
+            "resampler_dim": self.resampler_dim,
+            "vision_dim": self.vision_dim,
+            "max_seq_len": self.max_seq_len,
+        })
+        return d
 
 class GelatoModel(nn.Module):
     def __init__(self, config: GelatoConfig):
@@ -64,7 +81,8 @@ class GelatoModel(nn.Module):
             dim=text_dim,
             depth=config.resampler_depth,
             num_latents=config.resampler_latents,
-            input_dim=vision_dim
+            input_dim=vision_dim,
+            num_media_embeds=64  # Safely handle up to 64 image patches instead of 4
         )
         
     def train(self, mode=True):
@@ -82,7 +100,7 @@ class GelatoModel(nn.Module):
     def resize_token_embeddings(self, new_num_tokens):
         self.text_model.resize_token_embeddings(new_num_tokens)
 
-    def forward(self, pixel_values, input_ids, labels=None, attention_mask=None):
+    def forward(self, pixel_values, input_ids, image_attention_mask=None, labels=None, attention_mask=None):
         """
         pixel_values: [B, Num_Patches, C, H, W] or [B, C, H, W] if single patch?
                       Plan says [Batch, 4, 3, 512, 512].
@@ -113,7 +131,11 @@ class GelatoModel(nn.Module):
         
         # Pass through Resampler
         # Output: [B, Num_Latents, D_txt]
-        visual_features = self.resampler(image_embeds)
+        visual_features = self.resampler(
+            image_embeds, 
+            num_media=num_patches,
+            image_attention_mask=image_attention_mask
+        )
         
         # Combine with Text Embeddings
         # We need to replace special tokens <I> with these features or concat?
@@ -164,7 +186,7 @@ class GelatoModel(nn.Module):
         outputs = self.text_model(inputs_embeds=combined_embeds, attention_mask=attention_mask, labels=labels)
         return outputs
 
-    def generate(self, pixel_values, prompt_ids=None, **kwargs):
+    def generate(self, pixel_values, image_attention_mask=None, prompt_ids=None, **kwargs):
         # Inference logic
         b, num_patches, c, h, w = pixel_values.shape
         with torch.no_grad():
@@ -172,7 +194,11 @@ class GelatoModel(nn.Module):
             image_embeds = vision_outputs.last_hidden_state
         
         image_embeds = image_embeds.view(b, num_patches * image_embeds.shape[1], -1)
-        visual_features = self.resampler(image_embeds)
+        visual_features = self.resampler(
+            image_embeds,
+            num_media=num_patches,
+            image_attention_mask=image_attention_mask
+        )
         
         # We can't easily use .generate directly if we need to modify inputs_embeds unless we assume inputs_embeds is supported?
         # Gemma .generate supports inputs_embeds? Usually yes via underlying model.

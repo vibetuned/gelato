@@ -1,3 +1,7 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
 [project]
 name = "gelato"
 version = "0.1.0"
@@ -7,12 +11,13 @@ requires-python = ">=3.13"
 dependencies = [
     "accelerate>=1.12.0",
     "datasets>=4.5.0",
+    "levenshtein>=0.27.3",
     "numpy>=2.4.1",
     "pillow>=12.1.0",
     "sentencepiece>=0.2.1",
+    "tensorboard>=2.20.0",
     "torch>=2.10.0",
     "transformers>=4.57.6",
-    "wandb>=0.24.0",
 ]
 
 [dependency-groups]
@@ -20,3 +25,13 @@ dev = [
     "ruff>=0.14.14",
     "ty>=0.0.13",
 ]
+
+[project.scripts]
+gelato-train = "gelato.scripts.train:main"
+gelato-eval = "gelato.scripts.evaluate:main"
+gelato-data-full = "gelato.scripts.create_full_dataset:main"
+gelato-data-test = "gelato.scripts.create_test_dataset:main"
+gelato-data-dummy = "gelato.scripts.generate_test_data:main"
+gelato-data-real = "gelato.scripts.process_real_sample:main"
+gelato-verify = "gelato.scripts.verify_setup:main"
+gelato-main = "gelato.scripts.main:main"

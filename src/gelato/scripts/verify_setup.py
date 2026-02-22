@@ -53,6 +53,9 @@ def test_model_load():
     except Exception as e:
         print(f"[FAIL] Model components test failed: {e}")
 
-if __name__ == "__main__":
+def main():
     test_external_tools()
     test_model_load()
+
+if __name__ == "__main__":
+    main()
