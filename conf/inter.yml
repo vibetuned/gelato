@@ -1,0 +1,35 @@
+# Data Configuration
+img_dir: "data/dataset-inter/imgs"
+abc_dir: "data/dataset-inter/abcs"
+input_size: 640
+num_workers: 4
+
+# Model Configuration
+vision_model_name: "convnext_base.dinov3_lvd1689m"
+text_model_name: "google/gemma-3-270m"
+text_dim: 1024
+vision_feature_dims: 
+  - 128
+  - 256
+  - 512
+engram_warm_start: null
+
+# Low Memory Configuration
+visual_pool_size: 12
+max_seq_len: 768
+grad_accum_steps: 8
+
+# Training Configuration
+phase: "finetune"
+fine_tune: "checkpoints/run_001"
+output_dir: "checkpoints"
+logging_dir: "runs"
+epochs: 5
+batch_size: 4
+lr: 0.00002
+logging_steps: 50
+save_steps: 500
+max_steps: -1
+seed: 42
+resume: false
+resume_from_checkpoint: null

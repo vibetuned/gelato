@@ -1,0 +1,26 @@
+# Data Configuration
+img_dir: "data/eval-align/imgs"
+abc_dir: "data/eval-align/abcs-strip"
+input_size: 640
+num_workers: 4
+batch_size: 4
+
+# Model Configuration
+vision_model_name: "convnext_base.dinov3_lvd1689m"
+text_model_name: "google/gemma-3-270m"
+text_dim: 1024
+vision_feature_dims: 
+  - 128
+  - 256
+  - 512
+visual_pool_size: 12
+max_seq_len: 768
+
+# Eval Configuration
+checkpoint: "checkpoints/run_001"
+tb_dir: "runs"
+max_new_tokens: 512
+no_static: false
+num_workers_metric: 8
+seed: 42
+device: "cuda"

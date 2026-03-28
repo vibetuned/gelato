@@ -16,7 +16,12 @@ def error_rate(preds, refs, desc="error rate", num_workers=8):
             desc=f"computing {desc}...",
             total=len(preds)
         ))
-    return sum(dists) / sum(len(r) for r in refs) * 100
+    
+    total_ref_len = sum(len(r) for r in refs)
+    if total_ref_len == 0:
+        return 0.0 if sum(dists) == 0 else 100.0
+        
+    return sum(dists) / total_ref_len * 100
 
 def compute_error_rates(
     tokenizer: PreTrainedTokenizer, 

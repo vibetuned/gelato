@@ -11,3 +11,6 @@ wheels/
 /data/
 /checkpoints/
 /wandb/
+/runs/
+/tmp/
+/test/
