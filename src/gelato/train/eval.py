@@ -122,10 +122,18 @@ def run_eval(args):
     all_labels = []  # list of token-id lists
 
     logger.info(f"Running evaluation on {len(dataset)} samples...")
+    model.config.engram = False
     pbar = tqdm(dataloader, desc="Evaluating", unit="batch")
     for batch in pbar:
         pixel_values = batch["pixel_values"].to(device)
         labels = batch["labels"]  # (B, seq_len), padding = -100
+
+        out = model(
+            pixel_values=pixel_values,
+            input_ids=batch["input_ids"].to(device),
+            labels=labels.to(device),
+        )
+        print(f"Loss WITHOUT Engram: {out.loss.item()}")
 
         generated = model.generate(
             pixel_values=pixel_values,
@@ -139,8 +147,8 @@ def run_eval(args):
         for i in range(labels.shape[0]):
             ref = labels[i][labels[i] != -100].tolist()
             pred = generated[i].tolist()
-            #logger.info(f"Ref: {tokenizer.decode(ref)}")
-            #logger.info(f"Pred: {tokenizer.decode(pred)}")
+            logger.info(f"Ref: {tokenizer.decode(ref)}")
+            logger.info(f"Pred: {tokenizer.decode(pred)}")
             
             # --- THE ALIGNMENT FIX ---
             bos_id = tokenizer.bos_token_id

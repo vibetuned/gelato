@@ -350,11 +350,12 @@ class ShortConv(nn.Module):
         return y
 
 class Engram(nn.Module):
-    def __init__(self, layer_id, original_layer, hidden_size=640):
+    def __init__(self, layer_id, original_layer, hidden_size=640, mask_ratio=0.5):
         super().__init__()
         self.layer_id = layer_id
         self.original_layer = original_layer
         self.hidden_size = hidden_size
+        self.mask_ratio = mask_ratio
         
         # Keep hash mapping and embedding standard
         self.hash_mapping = NgramHashMapping(
@@ -396,9 +397,19 @@ class Engram(nn.Module):
         
     def set_prefill_state(self, input_ids, vis_seq_len):
         """Called by the model during the first forward pass."""
-        self._token_cache = input_ids
         self._vis_seq_len = vis_seq_len
         self._conv_cache = None
+
+        if self.training and self.mask_ratio > 0:
+            # Randomly replace tokens with pad so n-gram hashes become incomplete
+            mask = torch.rand(input_ids.shape, device=input_ids.device) < self.mask_ratio
+            # Never mask the first token (BOS) — keep at least some anchor
+            mask[:, 0] = False
+            masked_ids = input_ids.clone()
+            masked_ids[mask] = self.hash_mapping.pad_id
+            self._token_cache = masked_ids
+        else:
+            self._token_cache = input_ids
         
     def append_decode_token(self, next_token_id):
         """Called by the model during autoregressive generation."""

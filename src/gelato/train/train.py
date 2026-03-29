@@ -61,6 +61,7 @@ def parse_args():
     parser.add_argument("--visual-pool-size", type=int, default=12) # Down from 16
     parser.add_argument("--max-seq-len", type=int, default=768)     # Down from 2048
     parser.add_argument("--grad-accum-steps", type=int, default=8)  # New argument
+    parser.add_argument("--mask-ratio", type=float, default=0.5, help="Mask ratio for Engram training")
 
     # Training args
     parser.add_argument("--output-dir", type=str, default="checkpoints")
@@ -142,6 +143,7 @@ def main():
         vision_feature_dims=args.vision_feature_dims,
         visual_pool_size=args.visual_pool_size,
         max_seq_len=args.max_seq_len,
+        mask_ratio=args.mask_ratio,
     )
 
     model = GelatoModel(model_config)

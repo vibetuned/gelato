@@ -19,7 +19,7 @@ class STATICGrammarCompiler:
             "linebreak":   [],  # \n tokens
             "chord_open":  [],  # [
             "chord_close": [],  # ]
-            "text":        [],  # Lyrics, annotations, markup, everything else
+            #"text":        [],  # Lyrics, annotations, markup, everything else
         }
 
         for token_str, token_id in self.vocab.items():
@@ -56,8 +56,8 @@ class STATICGrammarCompiler:
             elif re.fullmatch(r"^[,']*\]$", clean_str):
                 categories["chord_close"].append(token_id)
             
-            else:
-                categories["text"].append(token_id)
+            #else:
+            #    categories["text"].append(token_id)
 
         return categories
 
@@ -75,7 +75,7 @@ class STATICGrammarCompiler:
         # 7: Chord open   (after [)
         # 8: Chord close  (after ])
         # 9: Text         (lyrics/annotations)
-        num_states = 10
+        num_states = 9
 
         token_to_state = torch.zeros(self.vocab_size, dtype=torch.long, device=device)
         token_to_state[categories["header"]]      = 1
@@ -86,7 +86,7 @@ class STATICGrammarCompiler:
         token_to_state[categories["linebreak"]]    = 6
         token_to_state[categories["chord_open"]]   = 7
         token_to_state[categories["chord_close"]]  = 8
-        token_to_state[categories["text"]]         = 9
+        #token_to_state[categories["text"]]         = 9
 
         state_to_allowed = torch.zeros(
             (num_states, self.vocab_size), dtype=torch.bool, device=device
@@ -105,44 +105,44 @@ class STATICGrammarCompiler:
         lb = categories["linebreak"]
         co = categories["chord_open"]
         cc = categories["chord_close"]
-        t = categories["text"]
+        #t = categories["text"]
 
         # State 0 — Fallback: allow everything
         state_to_allowed[0, :] = True
 
         # State 1 — Header: header tokens can continue (K:C has multiple tokens),
         #   or a linebreak ends the header field, or another header starts
-        state_to_allowed[1, h + w + lb + d + p + t + eos_list] = True
+        state_to_allowed[1, h + w + lb + d + p + eos_list] = True
 
         # State 2 — After pitch: expect duration, another pitch (in chords),
         #   barline, whitespace, linebreak, chord close, or EOS
-        state_to_allowed[2, d + p + b + w + lb + cc + t + eos_list] = True
+        state_to_allowed[2, d + p + b + w + lb + cc + eos_list] = True
 
         # State 3 — After duration: the note is complete, expect next pitch,
         #   barline, whitespace, linebreak, chord open, or EOS
-        state_to_allowed[3, p + b + w + lb + co + t + eos_list] = True
+        state_to_allowed[3, p + b + w + lb + co + eos_list] = True
 
         # State 4 — After barline: expect pitch, whitespace, linebreak,
         #   chord open, or EOS (end of piece)
-        state_to_allowed[4, p + w + lb + co + t + eos_list] = True
+        state_to_allowed[4, p + w + lb + co + eos_list] = True
 
         # State 5 — After whitespace: expect pitch, barline, duration,
         #   linebreak, chord open, or EOS
-        state_to_allowed[5, p + b + d + lb + co + t + eos_list] = True
+        state_to_allowed[5, p + b + d + lb + co + eos_list] = True
 
         # State 6 — After linebreak: this is where a new line starts.
         #   Could be a header field, pitch, barline, chord open, 
         #   another linebreak, or EOS
-        state_to_allowed[6, h + p + b + co + lb + t + eos_list] = True
+        state_to_allowed[6, h + p + b + co + lb + eos_list] = True
 
         # State 7 — After chord open [: ONLY pitches allowed inside chords
-        state_to_allowed[7, p + t] = True
+        state_to_allowed[7, p] = True
 
         # State 8 — After chord close ]: expect duration (the chord's rhythm)
-        state_to_allowed[8, d + w + b + lb + t + eos_list] = True
+        state_to_allowed[8, d + w + b + lb + eos_list] = True
 
         # State 9 — After text: allow everything
-        state_to_allowed[9, t + w + lb + p + d + b + co + cc + h + eos_list] = True
+        #state_to_allowed[9, t + w + lb + p + d + b + co + cc + h + eos_list] = True
 
         # Ensure EOS/PAD always self-loop for clean termination
         if eos_id is not None:

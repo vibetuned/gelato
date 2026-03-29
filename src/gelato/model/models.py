@@ -14,6 +14,7 @@ class GelatoConfig(PretrainedConfig):
                  vision_feature_dims=[128, 256, 512],
                  visual_pool_size=16,   # each feature map is pooled to (P x P) tokens
                  max_seq_len=2048,
+                 mask_ratio=0.5,
                  num_hidden_layers=26,  # <-- Add this to satisfy HF generation
                  vocab_size=256000,     # <-- Good practice to add this too for Gemma 3
                  **kwargs):
@@ -24,6 +25,7 @@ class GelatoConfig(PretrainedConfig):
         self.vision_feature_dims = vision_feature_dims
         self.visual_pool_size = visual_pool_size
         self.max_seq_len = max_seq_len
+        self.mask_ratio = mask_ratio
         self.num_hidden_layers = num_hidden_layers
         self.vocab_size = vocab_size
         self.engram = True
@@ -86,7 +88,7 @@ class GelatoModel(PreTrainedModel, GenerationMixin):
         # 4. Engram Surgery — parent_model reference lets Engram read cached input_ids (fix #1)
         if config.engram:
             original_layer = self.text_model.model.layers[1]
-            engram_layer = Engram(layer_id=1, original_layer=original_layer, hidden_size=real_text_dim).to(model_dtype)
+            engram_layer = Engram(layer_id=1, original_layer=original_layer, hidden_size=real_text_dim, mask_ratio=config.mask_ratio).to(model_dtype)
             
             # Duck-type the Engram module to keep Hugging Face's forward loop happy
             if hasattr(original_layer, "attention_type"):
