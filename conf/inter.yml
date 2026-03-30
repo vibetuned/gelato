@@ -4,6 +4,12 @@ abc_dir: "data/dataset-inter/abcs"
 input_size: 640
 num_workers: 4
 
+# Data Mixture Configuration
+use_mix: true
+mix_ratio: -8
+mix_img_dir: "data/dataset-align/imgs"
+mix_ann_dir: "data/dataset-align/abcs-strip"
+
 # Model Configuration
 vision_model_name: "convnext_base.dinov3_lvd1689m"
 text_model_name: "google/gemma-3-270m"

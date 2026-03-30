@@ -20,7 +20,7 @@ from transformers import TrainingArguments, Trainer, set_seed
 from transformers.trainer_utils import get_last_checkpoint
 
 from gelato.model.models import GelatoModel, GelatoConfig
-from gelato.train.utils import get_tokenizer, load_checkpoint
+from gelato.train.utils import get_tokenizer, load_checkpoint, RatioSampler
 from gelato.train.dataset import GelatoDataset
 from gelato.train.utils import GelatoDataCollator
 
@@ -49,6 +49,12 @@ def parse_args():
     parser.add_argument("--abc-dir", type=str, default="data/dataset-small/abcs")
     parser.add_argument("--input-size", type=int, default=640)
     parser.add_argument("--num-workers", type=int, default=4)
+    
+    # Mixture Data args
+    parser.add_argument("--use-mix", action="store_true", help="Whether to mix a second dataset.")
+    parser.add_argument("--mix-ratio", type=int, default=1, help="Ratio for the mixture. >0 oversamples mix, <0 oversamples main.")
+    parser.add_argument("--mix-img-dir", type=str, default="data/dataset-align/imgs", help="Image directory for the mix dataset.")
+    parser.add_argument("--mix-ann-dir", type=str, default="data/dataset-align/abcs-strip", help="Annotations directory for the mix dataset.")
 
     # Model args
     parser.add_argument("--vision-model-name", type=str, default="convnext_base.dinov3_lvd1689m")
@@ -124,12 +130,49 @@ def main():
     tokenizer = get_tokenizer(args.text_model_name)
 
     logger.info("Initializing dataset...")
-    train_dataset = GelatoDataset(
+    full_ds = GelatoDataset(
         img_dir=args.img_dir,
         abc_dir=args.abc_dir,
         tokenizer=tokenizer,
         input_size=args.input_size,
     )
+
+
+    train_dataset = torch.utils.data.Subset(full_ds, range(len(full_ds)))
+
+    custom_sampler = None
+    if args.use_mix:
+        logger.info(f"Loading synthetic dataset with ratio 1:{args.mix_ratio}...")
+        mix_ds = GelatoDataset(
+            img_dir=args.mix_img_dir,
+            abc_dir=args.mix_ann_dir,
+            tokenizer=tokenizer,
+            input_size=args.input_size,
+        )
+        mix_subset = torch.utils.data.Subset(mix_ds, range(len(mix_ds)))
+
+        if args.mix_ratio > 0:
+            train_dataset = torch.utils.data.ConcatDataset(
+                [mix_subset, train_dataset]
+            )
+            dataset_lengths = [len(mix_ds), len(full_ds)]
+            ratios = [1, args.mix_ratio]
+            custom_sampler = RatioSampler(dataset_lengths, ratios)
+            logger.info(f"Using synthetic data with ratio 1:{args.mix_ratio}")
+
+        elif args.mix_ratio < 0:
+            train_dataset = torch.utils.data.ConcatDataset(
+                [train_dataset, mix_subset]
+            )
+            dataset_lengths = [len(full_ds), len(mix_ds)]
+            ratio = abs(args.mix_ratio)
+            ratios = [ratio, 1]
+            custom_sampler = RatioSampler(dataset_lengths, ratios)
+            logger.info(f"Using synthetic data with ratio {ratio}:1")
+
+        else:
+            logger.warning("Invalid synthetic ratio. Using real data only.")
+
     
     data_collator = GelatoDataCollator(
         tokenizer=tokenizer,
@@ -217,6 +260,7 @@ def main():
         static_processor=static_processor,
         lr_projector=args.lr_projector,
         lr_text=args.lr_text,
+        custom_sampler=custom_sampler,
     )
 
     checkpoint = None

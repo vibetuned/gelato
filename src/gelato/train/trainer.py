@@ -3,7 +3,7 @@ from transformers import Trainer
 from transformers.generation.logits_process import LogitsProcessorList
 
 class GelatoSTATICTrainer(Trainer):
-    def __init__(self, *args, static_processor=None, lr_projector=1e-4, lr_text=2e-5, **kwargs):
+    def __init__(self, *args, static_processor=None, lr_projector=1e-4, lr_text=2e-5, custom_sampler=None, **kwargs):
         super().__init__(*args, **kwargs)
         # Initialize the STATIC Bouncer
         self.static_processor = static_processor
@@ -13,6 +13,13 @@ class GelatoSTATICTrainer(Trainer):
         
         self.lr_projector = lr_projector
         self.lr_text = lr_text
+
+        self.custom_sampler = custom_sampler
+
+    def _get_train_sampler(self):
+        if self.custom_sampler is not None:
+            return self.custom_sampler
+        return super()._get_train_sampler()
 
     def create_optimizer(self):
         """

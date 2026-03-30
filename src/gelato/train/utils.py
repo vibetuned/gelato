@@ -5,6 +5,57 @@ from transformers import AutoTokenizer, PreTrainedTokenizer
 from transformers.trainer_utils import get_last_checkpoint
 logger = logging.getLogger(__name__)
 
+class RatioSampler(torch.utils.data.Sampler):
+    """
+    Samples from multiple datasets with specific ratios.
+    Anchors the epoch length to the FIRST dataset (index 0).
+    For example, ratios=[9, 1] means 9 samples from dataset 0 for every 1 from dataset 1.
+    Dataset 1 will be oversampled or subsampled to exactly match Dataset 0's needs.
+    """
+
+    def __init__(self, dataset_lengths, ratios):
+        self.dataset_lengths = dataset_lengths
+        self.ratios = ratios
+
+        self.offsets = [0]
+        for i in range(len(dataset_lengths) - 1):
+            self.offsets.append(self.offsets[-1] + dataset_lengths[i])
+
+        # Base length is strictly determined by the FIRST dataset (the anchor).
+        # This guarantees 1 full pass of dataset 0. Other datasets follow the ratio.
+        self.base_len = max(1, dataset_lengths[0] // ratios[0])
+        self.total_size = sum([self.base_len * r for r in ratios])
+
+    def __iter__(self):
+        iters = []
+        for i, l in enumerate(self.dataset_lengths):
+            if l == 0:
+                raise ValueError(f"Dataset at index {i} has length 0.")
+
+            num_samples = self.base_len * self.ratios[i]
+
+            if num_samples > l:
+                # Oversample: repeat the dataset enough times to satisfy the ratio
+                repeats = (num_samples // l) + 1
+                perm = torch.cat([torch.randperm(l) for _ in range(repeats)])[
+                    :num_samples
+                ]
+            else:
+                # Undersample: randomly pick the exact number of samples needed
+                # (Silently drops the remainder of this specific epoch)
+                perm = torch.randperm(l)[:num_samples]
+
+            iters.append(iter(perm.tolist()))
+
+        # Yield indices following the strict ratio sequence
+        for _ in range(self.base_len):
+            for i, r in enumerate(self.ratios):
+                for _ in range(r):
+                    yield next(iters[i]) + self.offsets[i]
+
+    def __len__(self):
+        return self.total_size
+
 
 def get_tokenizer(model_name: str = "google/gemma-3-270m") -> PreTrainedTokenizer:
     tokenizer = AutoTokenizer.from_pretrained(model_name)
