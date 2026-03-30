@@ -21,7 +21,7 @@ def build_abc_tokenizer(save_dir="./custom-abc-tokenizer"):
     # ORDER MATTERS for greedy matching: longer tokens first within groups
     abc_vocab = [
         # ── Control tokens ────────────────────────────────────────────
-        "<pad>", "<s>", "</s>", "<unk>",
+        "<pad>", "</s>", "<s>", "<unk>",
 
         # ── Whitespace ────────────────────────────────────────────────
         "\n", " ",
@@ -142,8 +142,12 @@ def build_abc_tokenizer(save_dir="./custom-abc-tokenizer"):
         pad_token="<pad>",
     )
 
-    hf_tokenizer.save_pretrained(save_dir)
-    print(f"Tokenizer saved to {save_dir}  |  vocab size: {len(hf_tokenizer)}")
+    if save_dir is not None:
+        hf_tokenizer.save_pretrained(save_dir)
+        print(f"Tokenizer saved to {save_dir}  |  vocab size: {len(hf_tokenizer)}")
+    else:
+        print(f"Tokenizer built dynamically |  vocab size: {len(hf_tokenizer)}")
+        
     return hf_tokenizer
 
 

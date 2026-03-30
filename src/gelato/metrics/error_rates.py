@@ -30,8 +30,8 @@ def compute_error_rates(
     preds,
 ) -> Dict[str, float]:
 
-    preds_text = tokenizer.batch_decode(preds, skip_special_tokens=True)
-    refs_text = tokenizer.batch_decode(label_ids, skip_special_tokens=True)
+    preds_text = tokenizer.batch_decode(preds, skip_special_tokens=False)
+    refs_text = tokenizer.batch_decode(label_ids, skip_special_tokens=False)
 
     SER = error_rate(preds, label_ids, "SER", num_workers)
     CER = error_rate(preds_text, refs_text, "CER", num_workers)

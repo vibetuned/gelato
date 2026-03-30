@@ -42,13 +42,12 @@ def extract_and_warm_start(
         token_str = tokenizer.convert_ids_to_tokens(new_id)
         decoded_str = tokenizer.decode([new_id], skip_special_tokens=False)
         old_ids = old_tokenizer.encode(decoded_str, add_special_tokens=False)
-        if len(old_ids) != 1:
-            old_ids_str = old_tokenizer.encode(token_str, add_special_tokens=False)
-            if len(old_ids_str) == 1:
-                old_ids = old_ids_str
-        if len(old_ids) == 1:
-            with torch.no_grad():
+        with torch.no_grad():
+            if len(old_ids) == 1:
                 new_embeddings[new_id] = old_embeddings[old_ids[0]]
+            elif len(old_ids) > 1:
+                sub_embs = old_embeddings[old_ids]
+                new_embeddings[new_id] = sub_embs.mean(dim=0)
                 
     # Save the base model and tokenizer NOW so EngramConfig can load it natively
     hf_save_path = os.path.join(os.path.dirname(output_path), "gemma-3-gelato-resized")

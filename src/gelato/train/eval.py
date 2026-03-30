@@ -147,8 +147,6 @@ def run_eval(args):
         for i in range(labels.shape[0]):
             ref = labels[i][labels[i] != -100].tolist()
             pred = generated[i].tolist()
-            logger.info(f"Ref: {tokenizer.decode(ref)}")
-            logger.info(f"Pred: {tokenizer.decode(pred)}")
             
             # --- THE ALIGNMENT FIX ---
             bos_id = tokenizer.bos_token_id
@@ -159,8 +157,11 @@ def run_eval(args):
             ref = [t for t in ref if t not in (bos_id, eos_id, pad_id)]
             
             # Remove EOS and PAD from prediction (pred doesn't have BOS because of inputs_embeds)
-            pred = [t for t in pred if t not in (eos_id, pad_id)]
+            pred = [t for t in pred if t not in (bos_id, eos_id, pad_id)]
+            
             # -------------------------
+            logger.info(f"Ref: {tokenizer.decode(ref)}")
+            logger.info(f"Pred: {tokenizer.decode(pred)}")
             
             all_labels.append(ref)
             all_preds.append(pred)

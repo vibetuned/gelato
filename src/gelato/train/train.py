@@ -68,7 +68,8 @@ def parse_args():
     parser.add_argument("--logging-dir", type=str, default="runs")
     parser.add_argument("--epochs", type=int, default=40)
     parser.add_argument("--batch-size", type=int, default=4)
-    parser.add_argument("--lr", type=float, default=1e-4)
+    parser.add_argument("--lr-projector", type=float, default=1e-4)
+    parser.add_argument("--lr-text", type=float, default=2e-5)
     parser.add_argument("--logging-steps", type=int, default=50)
     parser.add_argument("--save-steps", type=int, default=500)
     parser.add_argument("--max-steps", type=int, default=-1)
@@ -150,38 +151,23 @@ def main():
 
     # --- NEW WARM START LOADING LOGIC ---
    
-    if args.phase == "finetune":
-        logger.info(
-            f"Loading weights from {args.fine_tune} for fine-tuning (forcing CPU to save VRAM)..."
-        )
-        device = torch.device("cpu")
-        load_checkpoint(model, args.fine_tune, device=device, eval=False)
-        logger.info("🔥 PHASE 2: Unfreezing text model for end-to-end fine-tuning.")
-        for param in model.text_model.parameters():
-            param.requires_grad = True
-    elif args.phase == "alignment":
-        logger.info("🥶 PHASE 1: Freezing text model. Training vision projectors only.")
-        for param in model.text_model.parameters():
-            param.requires_grad = False
-            
-        # Explicitly ensure the projectors remain unfrozen
-        for param in model.mm_projectors.parameters():
-            param.requires_grad = True  
-            
-        # Unfreeze the Engram inserted at layer 1
-        for param in model.text_model.model.layers[1].parameters():
-            param.requires_grad = True
+    for param in model.text_model.parameters():
+        param.requires_grad = True
+        
+    # Explicitly ensure the projectors remain unfrozen
+    for param in model.mm_projectors.parameters():
+        param.requires_grad = True  
 
-        warm_start_path = Path(args.engram_warm_start)
-        if warm_start_path.exists():
-            logger.info(f"Loading Engram warm-start weights from {warm_start_path}...")
-            # Load the saved MultiHeadEmbedding state_dict
-            state_dict = torch.load(warm_start_path, map_location="cpu", weights_only=True)
-            # Inject it into Layer 1's Engram module
-            model.text_model.model.layers[1].multi_head_embedding.load_state_dict(state_dict)
-            logger.info("✅ Warm-start weights successfully injected!")
-        else:
-            logger.warning("⚠️ No warm-start weights found. Engram is using random noise!")
+    warm_start_path = Path(args.engram_warm_start)
+    if warm_start_path.exists():
+        logger.info(f"Loading Engram warm-start weights from {warm_start_path}...")
+        # Load the saved MultiHeadEmbedding state_dict
+        state_dict = torch.load(warm_start_path, map_location="cpu", weights_only=True)
+        # Inject it into Layer 1's Engram module
+        model.text_model.model.layers[1].multi_head_embedding.load_state_dict(state_dict)
+        logger.info("✅ Warm-start weights successfully injected!")
+    else:
+        logger.warning("⚠️ No warm-start weights found. Engram is using random noise!")
     # ------------------------------------
 
     training_args = TrainingArguments(
@@ -190,7 +176,7 @@ def main():
         logging_dir=args.logging_dir+"/"+run_dir.name,
         num_train_epochs=args.epochs,
         per_device_train_batch_size=args.batch_size,
-        learning_rate=args.lr,
+        learning_rate=args.lr_text,  # HF fallback; custom trainer handles actual LRs
         logging_steps=args.logging_steps,
         save_steps=args.save_steps,
         max_steps=args.max_steps,
@@ -229,6 +215,8 @@ def main():
         data_collator=data_collator,
         tokenizer=tokenizer,
         static_processor=static_processor,
+        lr_projector=args.lr_projector,
+        lr_text=args.lr_text,
     )
 
     checkpoint = None

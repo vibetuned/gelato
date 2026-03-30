@@ -205,6 +205,7 @@ class GelatoModel(PreTrainedModel, GenerationMixin):
         # 2. Build the initial prompt (just the BOS token)
         b = pixel_values.shape[0]
         bos_token_id = self.text_model.config.bos_token_id
+
         input_ids = torch.full((b, 1), bos_token_id, dtype=torch.long, device=pixel_values.device)
 
         # 3. --- THE FIX: Explicitly pass Gemma's stopping criteria ---

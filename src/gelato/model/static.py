@@ -225,6 +225,10 @@ class ABCGrammarCompiler:
             for tid in cats.get(cat, []):
                 token_to_state[tid] = state_id
 
+        bos_id = self.tokenizer.bos_token_id
+        if bos_id is not None:
+            token_to_state[bos_id] = 0
+
         # ── Allowed-token masks per state ─────────────────────────────
         S = torch.zeros((NUM_STATES, self.vocab_size), dtype=torch.bool, device=device)
 
@@ -320,8 +324,10 @@ class ABCGrammarCompiler:
         # EOS/PAD always allowed
         if eos is not None:
             S[:, eos] = True
-        if pad is not None:
-            S[:, pad] = True
+        # --- PADDING ONLY IN COLLATOR ---
+        # if pad is not None:
+        #     S[:, pad] = True
+        # -------------------
 
         # ── Coverage diagnostic ───────────────────────────────────────
         n_uncat = (token_to_state == UNCATEGORIZED_STATE).sum().item()
