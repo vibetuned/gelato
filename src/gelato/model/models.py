@@ -16,7 +16,7 @@ class GelatoConfig(PretrainedConfig):
                  max_seq_len=2048,
                  mask_ratio=0.5,
                  num_hidden_layers=26,  # <-- Add this to satisfy HF generation
-                 vocab_size=256000,     # <-- Good practice to add this too for Gemma 3
+                 vocab_size=191,     # <-- Good practice to add this too for Gemma 3
                  **kwargs):
         super().__init__(**kwargs)
         self.vision_model_name = vision_model_name
@@ -73,7 +73,7 @@ class GelatoModel(PreTrainedModel, GenerationMixin):
 
         real_text_dim = self.text_model.config.hidden_size
         self.config.text_dim = real_text_dim # Overwrite the config for consistency
-
+        self.config.vocab_size = self.text_model.config.vocab_size 
         model_dtype = self.text_model.dtype
 
         # 3. Multi-Scale Projectors (one per feature map)

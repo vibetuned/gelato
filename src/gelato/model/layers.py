@@ -415,6 +415,9 @@ class Engram(nn.Module):
         """Called by the model during autoregressive generation."""
         if self._token_cache is not None:
             self._token_cache = torch.cat([self._token_cache, next_token_id], dim=1)
+            max_needed = self.hash_mapping.max_ngram_size
+            if self._token_cache.shape[1] > max_needed:
+                self._token_cache = self._token_cache[:, -max_needed:]
 
     def forward(self, hidden_states, **kwargs):
         # Fallback safeguard: if state isn't set, just run the normal layer
