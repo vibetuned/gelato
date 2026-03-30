@@ -7,6 +7,8 @@ Changes from original strip_abc.py:
   - Strips stafflines=, staffscale=, middle= (not in tokenizer)
   - Preserves clef= since tokenizer_sync.py now has "clef=" token
   - Strips %abc header line
+  - Strips text annotations ("^above", "_below", "<left", ">right", "@x,y offset")
+    while preserving chord symbols ("Am7", "Dm", "F#7")
 """
 
 import logging
@@ -42,14 +44,18 @@ _VOICE_STRIP_ATTRS = re.compile(
     r'\s+(?:merge|up|down|stem|gstem|dyn|lyrics|middle|staffscale|stafflines)'
     r'(?:=[^\s]*)?'
 )
+# Text annotations: "^above" "_below" "<left" ">right" "@x,y offset"
+# Chord symbols start with A-G and are KEPT: "Am7" "Dm" "F#7"
+_TEXT_ANNOTATION = re.compile(r'"[\^_<>@][^"]*"')
 
 
 def strip_abc(text: str) -> str:
     """Return a minimal ABC string suitable for tokenization and training.
 
-    Keeps: M:, L:, K:, V:, Q:, P: headers and all music lines.
+    Keeps: M:, L:, K:, V:, Q:, P: headers, music lines, and chord symbols.
     Strips: all other headers, %% directives, inline comments,
-            voice display names, and non-musical voice attributes.
+            voice display names, non-musical voice attributes,
+            and text annotations ("^...", "_...", "<...", ">...", "@...").
     """
     out = []
     for line in text.splitlines():
@@ -78,6 +84,10 @@ def strip_abc(text: str) -> str:
 
         # Remove inline comments
         line = _INLINE_COMMENT.sub("", line).rstrip()
+
+        # Remove text annotations ("^above", "_below", "<left", ">right", "@x,y...")
+        # but keep chord symbols ("Am7", "Dm", "F#7" — start with A-G)
+        line = _TEXT_ANNOTATION.sub("", line).strip()
 
         if line.strip():
             out.append(line.strip())

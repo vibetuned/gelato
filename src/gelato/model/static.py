@@ -1,3 +1,14 @@
+"""
+static2_sync.py — Logits processor synchronized with the custom ABC tokenizer.
+
+Changes from original static2.py:
+  - Uses the custom ABC tokenizer (not Gemma)
+  - Deterministic category assignment (no regex guessing)
+  - Fixes: chord-text self-loop, multi-note grace, header-value state,
+    dec-boundary open/close toggle, bracket chords, tuplets
+  - bos_token_id read from tokenizer
+"""
+
 import torch
 from transformers import LogitsProcessor
 
@@ -9,6 +20,8 @@ class ABCGrammarCompiler:
     Designed for the custom tokenizer from tokenizer.py — every token maps
     to exactly one grammar category via an explicit lookup table (no regex).
     """
+
+    UNCATEGORIZED_STATE = 17  # Tokens not in any category land here
 
     def __init__(self, tokenizer):
         """
@@ -40,13 +53,19 @@ class ABCGrammarCompiler:
             "alto", "alto1", "alto2", "alto4",
             "perc", "none",
             "Bb", "Eb", "Ab", "F#", "C#",
+            "Dor", "Mix", "Phr", "Lyd", "Loc",  # key modes
             "minor",
+            "clef=",        # V: attribute prefix
+            "transpose=",   # V: transposition (transpose=-3)
         ],
         # ── Sequence modifiers ────────────────────────────────────────
         "grace_open":   ["{"],
         "grace_close":  ["}"],
         "chord_quote":  ['"'],
-        "chord_text":   ["maj", "min", "m", "dim", "aug", "+", "sus"],
+        "chord_text":   ["maj", "min", "m", "dim", "aug", "+", "sus",
+                         "#",                          # sharp in chord names (F#7)
+                         "Bb", "Eb", "Ab", "F#", "C#", # flat/sharp roots in chords
+                        ],
         # ── Decorations ──────────────────────────────────────────────
         # Combined tokens: these are the ONLY decoration forms in the
         # custom tokenizer (no bare ! + name + ! sequence needed)
@@ -55,7 +74,8 @@ class ABCGrammarCompiler:
             "!fff!", "!ffff!", "!sfz!",
             "!crescendo(!", "!<(!", "!crescendo)!", "!<)!",
             "!diminuendo(!", "!>(!", "!diminuendo)!", "!>)!",
-            "!trill!", "!lowermordent!", "!uppermordent!", "!mordent!",
+            "!trill!", "!trill(!", "!trill)!",
+            "!lowermordent!", "!uppermordent!", "!mordent!",
             "!pralltriller!", "!accent!", "!>!", "!emphasis!", "!fermata!",
             "!invertedfermata!", "!tenuto!",
             "!trem1!", "!trem2!", "!trem3!", "!trem4!", "!xstem!", "!slide!",
@@ -64,6 +84,8 @@ class ABCGrammarCompiler:
             "!upbow!", "!downbow!", "!thumb!", "!snap!", "!turn!", "!roll!",
             "!breath!", "!segno!", "!coda!", "!D.S.!", "!D.C.!",
             "!dacoda!", "!dacapo!", "!fine!",
+            "!0!", "!1!", "!2!", "!3!", "!4!", "!5!",  # fingering
+            "!plus!", "!wedge!", "!open!",
         ],
         "dec_boundary": ["!"],  # bare ! — kept for backward compat but
                                 # should rarely appear with the custom tokenizer
@@ -76,7 +98,7 @@ class ABCGrammarCompiler:
                          "z", "Z", "X", "x", "y"],
         "octave":       [",", ",,", "'", "''"],
         "duration":     ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "/"],
-        "tie_slur":     ["-", "(", ")"],
+        "tie_slur":     ["-", "(", ")", ".(", ".)", ".-"],
         "bracket":      ["[", "]"],
     }
 
@@ -89,6 +111,8 @@ class ABCGrammarCompiler:
         "7", "9",
         # "+" is both chord-aug symbol and a standalone token
         "+",
+        # Flat/sharp keys are both header values and chord roots
+        "Bb", "Eb", "Ab", "F#", "C#",
     }
 
     def _build_token_categories(self):
@@ -96,16 +120,50 @@ class ABCGrammarCompiler:
         Returns:
             primary: dict[str, list[int]]  — category name → list of token IDs
             token_cats: dict[int, set[str]] — token ID → set of category names
+
+        Iterates over every token in the vocab, decodes it, and matches
+        against the category table. This is tokenizer-agnostic — works
+        regardless of how the vocab keys are stored internally (sentencepiece
+        byte-level, BPE Ġ-prefixed, raw strings, etc.).
         """
         primary = {cat: [] for cat in self._CATEGORY_TABLE}
         token_cats = {}  # token_id → set of categories
 
+        # Build reverse lookup: decoded_string → list of (category_name,)
+        # We index both raw and stripped forms for whitespace tokens
+        _lookup_raw = {}     # matches against raw decoded (preserves whitespace)
+        _lookup_clean = {}   # matches against stripped decoded
+
         for cat, token_strs in self._CATEGORY_TABLE.items():
             for tok_str in token_strs:
-                if tok_str in self.vocab:
-                    tid = self.vocab[tok_str]
-                    primary[cat].append(tid)
-                    token_cats.setdefault(tid, set()).add(cat)
+                _lookup_raw.setdefault(tok_str, []).append(cat)
+                stripped = tok_str.strip()
+                if stripped and stripped != tok_str:
+                    # Also index the stripped form (for tokens whose category
+                    # string has no whitespace but whose decoded form might)
+                    _lookup_clean.setdefault(stripped, []).append(cat)
+                elif stripped:
+                    _lookup_clean.setdefault(stripped, []).append(cat)
+
+        # Scan every token in the vocab
+        for token_str, token_id in self.vocab.items():
+            raw_decoded = self.tokenizer.decode([token_id])
+            clean_decoded = raw_decoded.strip()
+
+            matched_cats = set()
+
+            # 1. Try raw match first (catches \n, space, etc.)
+            if raw_decoded in _lookup_raw:
+                matched_cats.update(_lookup_raw[raw_decoded])
+
+            # 2. Try clean match (catches everything else)
+            if clean_decoded in _lookup_clean:
+                matched_cats.update(_lookup_clean[clean_decoded])
+
+            # Assign to categories
+            for cat in matched_cats:
+                primary[cat].append(token_id)
+                token_cats.setdefault(token_id, set()).add(cat)
 
         return primary, token_cats
 
@@ -136,9 +194,17 @@ class ABCGrammarCompiler:
         # 14  chord_close   (after closing '"')
         # 15  header_value  (after M:, K:, etc. — free until \n)
         # 16  bracket_open  (after [ for inline chords [ceg])
-        NUM_STATES = 17
+        # 17  UNCATEGORIZED (default — blocks everything except EOS/PAD)
+        NUM_STATES = 18
+        UNCATEGORIZED_STATE = 17
 
-        token_to_state = torch.zeros(self.vocab_size, dtype=torch.long, device=device)
+        # Initialize ALL tokens to uncategorized — only categorized tokens
+        # get overwritten below. This distinguishes "idle by design" (state 0)
+        # from "not in any category" (state 17).
+        token_to_state = torch.full(
+            (self.vocab_size,), UNCATEGORIZED_STATE,
+            dtype=torch.long, device=device
+        )
 
         # Primary state assignment — last write wins for multi-role tokens,
         # but the logits processor uses state_to_allowed which includes
@@ -238,19 +304,31 @@ class ABCGrammarCompiler:
                   "idle", "barline")] = True
 
         # State 15 — Header value (after M:, K:, etc.): allow header values,
-        #   key names (pitch tokens), digits, accidentals, idle (newline ends it)
+        #   key names (pitch tokens), digits, accidentals, idle (newline ends it),
+        #   tie_slur (for negative numbers in transpose=-3)
         S[15, ids("header_value", "pitch", "duration", "idle", "barline",
-                  "accidental")] = True
+                  "accidental", "tie_slur")] = True
 
         # State 16 — Inside bracket chord [ceg]: pitches, accidentals,
         #   durations, and close bracket
         S[16, ids("pitch", "accidental", "duration", "octave", "bracket")] = True
+
+        # State 17 — UNCATEGORIZED: no transitions allowed (only EOS/PAD
+        # from the block above). Any token that decodes to something not in
+        # _CATEGORY_TABLE lands here and is effectively blocked during generation.
 
         # EOS/PAD always allowed
         if eos is not None:
             S[:, eos] = True
         if pad is not None:
             S[:, pad] = True
+
+        # ── Coverage diagnostic ───────────────────────────────────────
+        n_uncat = (token_to_state == UNCATEGORIZED_STATE).sum().item()
+        n_categorized = self.vocab_size - n_uncat
+        if n_uncat > 0:
+            print(f"  Grammar coverage: {n_categorized}/{self.vocab_size} tokens "
+                  f"categorized, {n_uncat} uncategorized (state {UNCATEGORIZED_STATE})")
 
         return token_to_state, S, token_cats
 
@@ -271,19 +349,25 @@ class ABCLogitsProcessor(LogitsProcessor):
         self.bos_token_id = tokenizer.bos_token_id or 1
         self.eos_token_id = tokenizer.eos_token_id or 2
 
+        # Helper: resolve a token string → single token ID via encode(),
+        # bypassing BPE internal key encoding mismatches.
+        def _resolve(tok_str):
+            ids = tokenizer.encode(tok_str, add_special_tokens=False)
+            return ids[0] if len(ids) == 1 else None
+
         # Pre-compute token IDs for dynamic state adjustments
-        vocab = tokenizer.get_vocab()
-        self._quote_id = vocab.get('"')
-        self._newline_id = vocab.get('\n')
-        self._bracket_open_id = vocab.get('[')
-        self._bracket_close_id = vocab.get(']')
-        self._grace_close_id = vocab.get('}')
+        self._quote_id = _resolve('"')
+        self._newline_id = _resolve('\n')
+        self._bracket_open_id = _resolve('[')
+        self._bracket_close_id = _resolve(']')
+        self._grace_close_id = _resolve('}')
 
         # Header key IDs — for sticky header-value state
         self._header_key_ids = set()
         for tok in ["M:", "L:", "K:", "V:", "Q:", "P:"]:
-            if tok in vocab:
-                self._header_key_ids.add(vocab[tok])
+            tid = _resolve(tok)
+            if tid is not None:
+                self._header_key_ids.add(tid)
 
         # Per-batch tracking for header mode and chord-quote parity.
         # These are reset/grown as needed in __call__.
@@ -446,7 +530,12 @@ if __name__ == "__main__":
 
     # ── Simulate sequences through the FULL logits processor ──────────
     processor = ABCLogitsProcessor(t2s, s2a, tk)
-    vocab = tk.get_vocab()
+    vocab_size = len(tk)
+
+    def resolve(tok_str):
+        """Resolve a token string to its ID via encode()."""
+        ids = tk.encode(tok_str, add_special_tokens=False)
+        return ids[0] if len(ids) == 1 else None
 
     def simulate(label, token_strs):
         """Run tokens through the actual logits processor and report."""
@@ -454,14 +543,14 @@ if __name__ == "__main__":
         # Build up input_ids incrementally, checking allowed at each step
         ids_so_far = []
         for tok in token_strs:
-            tid = vocab.get(tok)
+            tid = resolve(tok)
             if tid is None:
-                print(f"    '{tok}' → NOT IN VOCAB")
+                print(f"    '{tok}' → NOT IN VOCAB (or not atomic)")
                 return False
 
             # Create fake scores (all zeros)
             input_tensor = torch.tensor([ids_so_far], dtype=torch.long)
-            fake_scores = torch.zeros(1, len(vocab))
+            fake_scores = torch.zeros(1, vocab_size)
             masked_scores = processor(input_tensor, fake_scores)
 
             is_allowed = masked_scores[0, tid].item() != float('-inf')
@@ -480,6 +569,10 @@ if __name__ == "__main__":
 
     # Test 2: Voice line — V:1 clef=bass (space bounces through idle)
     ok2 = simulate("V:1 clef=bass\\n", ["V:", "1", " ", "clef=", "bass", "\n"])
+
+    # Test 2b: Voice with transpose — V:1 transpose=-3
+    ok2b = simulate("V:1 transpose=-3\\n",
+                    ["V:", "1", " ", "transpose=", "-", "3", "\n"])
 
     # Test 3: Simple note with decoration
     ok3 = simulate("!mf! ^c'2", ["!mf!", "^", "c", "'", "2"])
@@ -502,16 +595,19 @@ if __name__ == "__main__":
 
     # Test 9: Header should NOT allow grace/decoration
     print("\n  Verifying: M: should NOT allow { or !trill!")
-    input_m = torch.tensor([[vocab["M:"]]], dtype=torch.long)
-    fake_scores = torch.zeros(1, len(vocab))
+    m_id = resolve("M:")
+    grace_id = resolve("{")
+    trill_id = resolve("!trill!")
+    input_m = torch.tensor([[m_id]], dtype=torch.long)
+    fake_scores = torch.zeros(1, vocab_size)
     masked = processor(input_m, fake_scores)
-    grace_blocked = masked[0, vocab["{"]].item() == float('-inf')
-    trill_blocked = masked[0, vocab["!trill!"]].item() == float('-inf')
+    grace_blocked = masked[0, grace_id].item() == float('-inf')
+    trill_blocked = masked[0, trill_id].item() == float('-inf')
     print(f"    {{ after M:: {'✓ blocked' if grace_blocked else '✗ ALLOWED (bug!)'}")
     print(f"    !trill! after M:: {'✓ blocked' if trill_blocked else '✗ ALLOWED (bug!)'}")
 
     # Summary
-    results = [ok1, ok2, ok3, ok4, ok5, ok6, ok7, ok8, grace_blocked, trill_blocked]
+    results = [ok1, ok2, ok2b, ok3, ok4, ok5, ok6, ok7, ok8, grace_blocked, trill_blocked]
     passed = sum(results)
     print(f"\n  {'='*50}")
     print(f"  Self-test: {passed}/{len(results)} passed")

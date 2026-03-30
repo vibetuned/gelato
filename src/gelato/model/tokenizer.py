@@ -1,3 +1,15 @@
+"""
+tokenizer_sync.py — Synchronized ABC tokenizer with gaps filled.
+
+Changes from original tokenizer.py:
+  - Added missing tokens: #, key modes (Dor, Mix, etc.), minor
+  - Added tuplet marker (3 — handled by existing ( and digits
+  - Added trill( and trill) span markers
+  - Reordered vocab so multi-char tokens precede their prefixes
+    (greedy matching picks the longest match first among special tokens)
+  - Added : for V: attribute parsing (clef=bass etc.)
+"""
+
 from tokenizers import Tokenizer
 from tokenizers.models import BPE
 from tokenizers.processors import TemplateProcessing
@@ -5,8 +17,6 @@ from transformers import PreTrainedTokenizerFast
 
 
 def build_abc_tokenizer(save_dir="./custom-abc-tokenizer"):
-
-
     # 1. Comprehensive ABC vocabulary
     # ORDER MATTERS for greedy matching: longer tokens first within groups
     abc_vocab = [
@@ -35,7 +45,8 @@ def build_abc_tokenizer(save_dir="./custom-abc-tokenizer"):
         "bass", "bass3",
         "alto", "alto1", "alto2", "alto4",
         "perc", "none",
-        "clef=",  # V: attribute prefix
+        "clef=",        # V: attribute prefix
+        "transpose=",   # V: transposition (transpose=-3)
 
         # ── Uppercase pitches / key names ────────────────────────────
         "C", "D", "E", "F", "G", "A", "B",
@@ -103,12 +114,14 @@ def build_abc_tokenizer(save_dir="./custom-abc-tokenizer"):
         # ── Dotted ties/slurs ────────────────────────────────────────
         ".(", ".)",  ".-",
     ]
-    # 2. Blank BPE with no merges — all tokenization is via special tokens
+
+    # 2. Build BPE with the full vocab pre-loaded (no merges — every token
+    #    is atomic). This ensures <unk> exists in the model vocabulary.
     vocab_dict = {tok: i for i, tok in enumerate(abc_vocab)}
     tokenizer = Tokenizer(BPE(vocab=vocab_dict, merges=[], unk_token="<unk>"))
     tokenizer.pre_tokenizer = None  # special tokens handle all splitting
 
-    # 3. Register all as special tokens (never split by BPE)
+    # 3. Mark every token as "special" so it is NEVER split by BPE
     tokenizer.add_special_tokens(abc_vocab)
 
     # 4. BOS/EOS wrapping for generation
@@ -120,6 +133,7 @@ def build_abc_tokenizer(save_dir="./custom-abc-tokenizer"):
         ],
     )
 
+    # 5. Wrap for HuggingFace
     hf_tokenizer = PreTrainedTokenizerFast(
         tokenizer_object=tokenizer,
         bos_token="<s>",
@@ -128,12 +142,8 @@ def build_abc_tokenizer(save_dir="./custom-abc-tokenizer"):
         pad_token="<pad>",
     )
 
-    if save_dir is not None:
-        hf_tokenizer.save_pretrained(save_dir)
-        print(f"Tokenizer saved to {save_dir}  |  vocab size: {len(hf_tokenizer)}")
-    else:
-        print(f"Tokenizer built dynamically |  vocab size: {len(hf_tokenizer)}")
-        
+    hf_tokenizer.save_pretrained(save_dir)
+    print(f"Tokenizer saved to {save_dir}  |  vocab size: {len(hf_tokenizer)}")
     return hf_tokenizer
 
 
