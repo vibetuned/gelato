@@ -12,17 +12,57 @@ from gelato.model.layers import EngramConfig, NgramHashMapping, MultiHeadEmbeddi
 def extract_and_warm_start(
     abc_dir="data/dataset-small/abcs", 
     model_name="google/gemma-3-270m",
+    custom_tokenizer_path=None,
     top_k_ngrams=10000,
     output_path="checkpoints/engram_warm_start.pt"
 ):
     print(f"Loading Tokenizer and Base Model: {model_name}")
-    tokenizer = AutoTokenizer.from_pretrained(model_name)
+    old_tokenizer = AutoTokenizer.from_pretrained(model_name)
     # We load the base model just to steal its embedding weights
     base_model = AutoModelForCausalLM.from_pretrained(model_name)
+    
+    if custom_tokenizer_path and os.path.exists(custom_tokenizer_path):
+        print(f"Loading Custom Tokenizer from: {custom_tokenizer_path}")
+        tokenizer = AutoTokenizer.from_pretrained(custom_tokenizer_path)
+    else:
+        print("Building Custom ABC Tokenizer dynamically...")
+        from gelato.model.tokenizer import build_abc_tokenizer
+        tokenizer = build_abc_tokenizer(save_dir=None)
+
+    print("Resizing and inheriting embeddings from old tokenizer...")
+    old_embeddings = base_model.get_input_embeddings().weight.data.clone()
+    base_model.resize_token_embeddings(len(tokenizer))
+    new_embeddings = base_model.get_input_embeddings().weight.data
+    mean_emb = old_embeddings.mean(dim=0)
+    
+    with torch.no_grad():
+        new_embeddings.copy_(mean_emb.unsqueeze(0).expand_as(new_embeddings))
+    
+    for new_id in range(len(tokenizer)):
+        token_str = tokenizer.convert_ids_to_tokens(new_id)
+        decoded_str = tokenizer.decode([new_id], skip_special_tokens=False)
+        old_ids = old_tokenizer.encode(decoded_str, add_special_tokens=False)
+        if len(old_ids) != 1:
+            old_ids_str = old_tokenizer.encode(token_str, add_special_tokens=False)
+            if len(old_ids_str) == 1:
+                old_ids = old_ids_str
+        if len(old_ids) == 1:
+            with torch.no_grad():
+                new_embeddings[new_id] = old_embeddings[old_ids[0]]
+                
+    # Save the base model and tokenizer NOW so EngramConfig can load it natively
+    hf_save_path = os.path.join(os.path.dirname(output_path), "gemma-3-gelato-resized")
+    os.makedirs(hf_save_path, exist_ok=True)
+    print(f"Saving surgically resized HuggingFace model and tokenizer to {hf_save_path}...")
+    base_model.save_pretrained(hf_save_path)
+    tokenizer.save_pretrained(hf_save_path)
+    
+    # Engram mapping will use the saved native directory
+    engram_cfg = EngramConfig(tokenizer_name_or_path=hf_save_path)
+
     base_embeddings = base_model.get_input_embeddings().weight.detach()
     
     # Initialize the Engram Hash Mapping to know WHERE to put the weights
-    engram_cfg = EngramConfig(tokenizer_name_or_path=model_name)
     hash_mapping = NgramHashMapping(
         engram_vocab_size=engram_cfg.engram_vocab_size,
         max_ngram_size=engram_cfg.max_ngram_size,
@@ -97,19 +137,23 @@ def extract_and_warm_start(
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
     torch.save(engram_memory.state_dict(), output_path)
     print(f"✅ Warm-start Engram weights saved to {output_path}")
+    print(f"✅ Base model successfully saved! Update your YAML config:")
+    print(f"   text_model_name: '{hf_save_path}'")
 
 def main():
     parser = argparse.ArgumentParser(description="Extract and warm-start Engram embeddings.")
     parser.add_argument("--abc-dir", "--abc_dir", dest="abc_dir", type=str, default="data/dataset-small/abcs", help="Directory containing ABC files.")
     parser.add_argument("--model-name", "--model_name", dest="model_name", type=str, default="google/gemma-3-270m", help="Base model name.")
+    parser.add_argument("--custom-tokenizer-path", "--custom_tokenizer_path", dest="custom_tokenizer_path", type=str, default=None, help="Path to custom tokenizer (if omitted, will build dynamically).")
     parser.add_argument("--top-k-ngrams", "--top_k_ngrams", dest="top_k_ngrams", type=int, default=10000, help="Number of Top-K n-grams to warm start.")
-    parser.add_argument("--output-path", "--output_path", dest="output_path", type=str, default="checkpoints/engram_warm_start.pt", help="Path to save weights.")
+    parser.add_argument("--output-path", "--output_path", dest="output_path", type=str, default="checkpoints/pretrain/engram_warm_start.pt", help="Path to save weights.")
     
     args = parser.parse_args()
     
     extract_and_warm_start(
         abc_dir=args.abc_dir,
         model_name=args.model_name,
+        custom_tokenizer_path=args.custom_tokenizer_path,
         top_k_ngrams=args.top_k_ngrams,
         output_path=args.output_path
     )

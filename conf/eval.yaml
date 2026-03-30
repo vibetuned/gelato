@@ -7,7 +7,7 @@ batch_size: 4
 
 # Model Configuration
 vision_model_name: "convnext_base.dinov3_lvd1689m"
-text_model_name: "google/gemma-3-270m"
+text_model_name: "checkpoints/pretrain/gemma-3-gelato-resized"
 text_dim: 1024
 vision_feature_dims: 
   - 128
@@ -17,7 +17,7 @@ visual_pool_size: 12
 max_seq_len: 768
 
 # Eval Configuration
-checkpoint: "checkpoints/run_002"
+checkpoint: "checkpoints/run_004"
 tb_dir: "runs"
 max_new_tokens: 512
 no_static: false

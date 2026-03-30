@@ -1,4 +1,14 @@
-# Standard library imports
+"""
+strip_abc_sync.py — Synchronized ABC stripper aligned with the tokenizer vocabulary.
+
+Changes from original strip_abc.py:
+  - V: lines: strips nm=, snm=, AND simplifies clef values to match tokenizer
+  - Strips voice attributes not in the tokenizer vocab (merge, stem=, dyn=, etc.)
+  - Strips stafflines=, staffscale=, middle= (not in tokenizer)
+  - Preserves clef= since tokenizer_sync.py now has "clef=" token
+  - Strips %abc header line
+"""
+
 import logging
 import argparse
 import multiprocessing
@@ -6,7 +16,6 @@ import re
 from pathlib import Path
 from concurrent.futures import ProcessPoolExecutor, as_completed
 
-# Third party imports
 from tqdm import tqdm
 
 logging.basicConfig(
@@ -14,25 +23,46 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Header fields that are strictly necessary for music representation
+# ── Regexes ──────────────────────────────────────────────────────────────
+
+# Headers to KEEP (music-essential)
 _KEEP_HEADERS = re.compile(r"^[MLKVQP]:")
-# Matches any standard abc header line (single letter then :)
+# Any standard header line
 _ANY_HEADER = re.compile(r"^[a-zA-Z]:")
-# Lines starting with %% (abc directives / pseudo-comments)
+# Directives (%%...)
 _DROP_DIRECTIVE = re.compile(r"^%%")
-# Inline bar-count comments at end of note lines (e.g. " %7")
+# ABC version header
+_ABC_HEADER = re.compile(r"^%abc")
+# Inline comments (% followed by anything, at end of line)
 _INLINE_COMMENT = re.compile(r"\s*%.*$")
-# Voice name attributes like nm="Piano" snm="Pno."
-_VOICE_NAMES = re.compile(r'\s+(?:nm|snm)="[^"]*"')
+# Voice display names (not useful for music generation)
+_VOICE_NAMES = re.compile(r'\s+(?:nm|snm|name|sname)="[^"]*"')
+# Voice attributes NOT in the tokenizer vocab
+_VOICE_STRIP_ATTRS = re.compile(
+    r'\s+(?:merge|up|down|stem|gstem|dyn|lyrics|middle|staffscale|stafflines)'
+    r'(?:=[^\s]*)?'
+)
 
 
 def strip_abc(text: str) -> str:
-    """Return a minimal ABC string with metadata and comments removed.
-    Preserves inline annotations and decorations (like "tr", !p!)."""
+    """Return a minimal ABC string suitable for tokenization and training.
+
+    Keeps: M:, L:, K:, V:, Q:, P: headers and all music lines.
+    Strips: all other headers, %% directives, inline comments,
+            voice display names, and non-musical voice attributes.
+    """
     out = []
     for line in text.splitlines():
         stripped = line.strip()
-        
+
+        # Skip empty lines
+        if not stripped:
+            continue
+
+        # Skip %abc version line
+        if _ABC_HEADER.match(stripped):
+            continue
+
         # Check if it's a header line
         if _ANY_HEADER.match(stripped):
             if not _KEEP_HEADERS.match(stripped):
@@ -40,22 +70,23 @@ def strip_abc(text: str) -> str:
         # Drop directives
         elif _DROP_DIRECTIVE.match(stripped):
             continue
-            
-        # Remove voice name attributes from V: lines
+
+        # Clean V: lines
         if stripped.startswith("V:"):
             line = _VOICE_NAMES.sub("", line)
-            
-        # Remove inline comments from all other lines
+            line = _VOICE_STRIP_ATTRS.sub("", line)
+
+        # Remove inline comments
         line = _INLINE_COMMENT.sub("", line).rstrip()
-        
-        if line.strip():  # Don't add completely empty lines
+
+        if line.strip():
             out.append(line.strip())
-            
+
     return "\n".join(out) + "\n"
 
 
 def process_file(abc_path: Path, output_dir: Path) -> bool:
-    """Strip metadata/comments from a single ABC file and write to output_dir."""
+    """Strip one ABC file and write to output_dir."""
     try:
         out_path = output_dir / abc_path.name
         if out_path.exists():
@@ -70,15 +101,12 @@ def process_file(abc_path: Path, output_dir: Path) -> bool:
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Strip X:, T:, C:, I: headers and comments from ABC files."
+        description="Strip non-essential headers and comments from ABC files."
     )
     parser.add_argument("input_dir", type=str, help="Directory containing .abc files")
     parser.add_argument(
-        "--out-dir",
-        "--out_dir",
-        dest="out_dir",
-        type=str,
-        required=True,
+        "--out-dir", "--out_dir", dest="out_dir",
+        type=str, required=True,
         help="Output directory for stripped .abc files",
     )
     args = parser.parse_args()
@@ -117,9 +145,7 @@ def main():
                 pbar.set_postfix(success=success_count, errors=error_count)
                 pbar.update(1)
 
-    logger.info(
-        f"Finished. Success: {success_count} | Failed: {error_count}"
-    )
+    logger.info(f"Finished. Success: {success_count} | Failed: {error_count}")
 
 
 if __name__ == "__main__":

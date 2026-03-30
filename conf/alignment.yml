@@ -6,13 +6,13 @@ num_workers: 4
 
 # Model Configuration
 vision_model_name: "convnext_base.dinov3_lvd1689m"
-text_model_name: "google/gemma-3-270m"
+text_model_name: "checkpoints/pretrain/gemma-3-gelato-resized"
 text_dim: 1024
 vision_feature_dims: 
   - 128
   - 256
   - 512
-engram_warm_start: "checkpoints/warm/engram_warm_start.pt"
+engram_warm_start: "checkpoints/pretrain/engram_warm_start.pt"
 
 # Low Memory Configuration
 visual_pool_size: 12

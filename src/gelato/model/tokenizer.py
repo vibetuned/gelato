@@ -1,75 +1,117 @@
-import json
 from tokenizers import Tokenizer
 from tokenizers.models import BPE
-from tokenizers.pre_tokenizers import WhitespaceSplit
 from tokenizers.processors import TemplateProcessing
 from transformers import PreTrainedTokenizerFast
 
-def build_abc_tokenizer():
-    # 1. Initialize a blank BPE tokenizer
-    tokenizer = Tokenizer(BPE(unk_token="<unk>"))
-    
-    # 2. Split by whitespace to prevent massive block merging
-    tokenizer.pre_tokenizer = None
-    
-    # 3. Define the strict, comprehensive ABC vocabulary
+
+def build_abc_tokenizer(save_dir="./custom-abc-tokenizer"):
+
+
+    # 1. Comprehensive ABC vocabulary
+    # ORDER MATTERS for greedy matching: longer tokens first within groups
     abc_vocab = [
+        # ── Control tokens ────────────────────────────────────────────
         "<pad>", "<s>", "</s>", "<unk>",
 
-        # Structural
+        # ── Whitespace ────────────────────────────────────────────────
         "\n", " ",
-        
-        # Headers (as complete tokens)
+
+        # ── Headers (complete tokens) ────────────────────────────────
         "L:", "M:", "K:", "V:", "Q:", "P:",
 
-        # Header values that appear in your stripped format
-        "1/4", "1/8", "1/16", "2/4", "3/4", "4/4", "6/8", "3/8",
-        "C", "G", "D", "F", "A", "E", "B",
+        # ── Time signatures & header values ──────────────────────────
+        "1/16", "1/8", "1/4",          # note lengths (longest first)
+        "2/4", "3/4", "4/4", "6/8", "3/8",  # meters
+        
+        # ── Key signatures ───────────────────────────────────────────
+        # Multi-char first so greedy matching works
         "Bb", "Eb", "Ab", "F#", "C#",
-        "bass", "treble",
-        
-        # Pitches (separate from header C, G, etc.)
+        # Modes (appear after key letter in K: lines)
+        "Dor", "Mix", "Phr", "Lyd", "Loc",
+        "minor",  # K:A minor — alternate form of minor key
+
+        # ── Clef / voice values ──────────────────────────────────────
+        "treble", "treble-8", "treble+8",
+        "bass", "bass3",
+        "alto", "alto1", "alto2", "alto4",
+        "perc", "none",
+        "clef=",  # V: attribute prefix
+
+        # ── Uppercase pitches / key names ────────────────────────────
+        "C", "D", "E", "F", "G", "A", "B",
+
+        # ── Lowercase pitches ────────────────────────────────────────
         "c", "d", "e", "f", "g", "a", "b",
-        "z", "Z", "X", "y",
-        
-        # Modifiers
-        "^", "^^", "_", "__", "=",
-        ",", ",,", "'", "''",
-        
-        # Octaves & Durations
+
+        # ── Special notes ────────────────────────────────────────────
+        "z", "Z", "X", "x", "y",
+
+        # ── Accidentals (longest first) ──────────────────────────────
+        "^^", "^", "__", "_", "=",
+
+        # ── Octave modifiers (longest first) ─────────────────────────
+        ",,", ",", "''", "'",
+
+        # ── Digits & fraction ────────────────────────────────────────
         "0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "/",
-        
-        # Structure, Barlines, Ties & Groupings
-        "|", "|]", "||", "|:", ":|", "::", "[1", "[2",
-        "-", "(", ")", "[", "]", "{", "}", "\"",
-        
+
+        # ── Barlines (longest first) ─────────────────────────────────
+        "|]", "||", "|:", ":|", "::", "[1", "[2", "|",
+
+        # ── Grouping & structure ─────────────────────────────────────
+        "-", "(", ")", "[", "]", "{", "}", '"',
+
+        # ── Combined decorations (single atomic tokens) ──────────────
         # Dynamics
-        "!pppp!", "!ppp!", "!pp!", "!p!", "!mp!", "!mf!", "!f!", "!ff!", "!fff!", "!ffff!", "!sfz!",
+        "!pppp!", "!ppp!", "!pp!", "!p!", "!mp!", "!mf!",
+        "!f!", "!ff!", "!fff!", "!ffff!", "!sfz!",
+        # Crescendo / diminuendo
         "!crescendo(!", "!<(!", "!crescendo)!", "!<)!",
         "!diminuendo(!", "!>(!", "!diminuendo)!", "!>)!",
-        
-        # Ornaments & Decorations
-        "!", "!trill!", "!lowermordent!", "!uppermordent!", "!mordent!", "!pralltriller!", 
-        "!accent!", "!>!", "!emphasis!", "!fermata!", "!invertedfermata!", "!tenuto!", 
-        "!trem1!", "!trem2!", "!trem3!", "!trem4!", "!xstem!", "!slide!", "!turnx!", 
-        "!invertedturnx!", "!arpeggio!", "!invertedturn!",
-        
-        # Fingering, Phrasing & Repeats
-        "!shortphrase!", "!mediumphrase!", "!longphrase!", "!upbow!", "!downbow!", 
-        "!thumb!", "!snap!", "!turn!", "!roll!", "!breath!",
-        "!segno!", "!coda!", "!D.S.!", "!D.C.!", "!dacoda!", "!dacapo!", "!fine!",
-        
-        # Short Forms
-        ".", "~", "H", "L", "M", "P", "S", "T", "u", "v", "O", "J", "R",
-        
-        # Chord Symbols
-        "maj", "min", "m", "dim", "aug", "+", "sus", "7", "9"
+        # Ornaments
+        "!trill!", "!trill(!", "!trill)!",  # trill + trill span
+        "!lowermordent!", "!uppermordent!", "!mordent!", "!pralltriller!",
+        "!accent!", "!>!", "!emphasis!", "!fermata!", "!invertedfermata!",
+        "!tenuto!",
+        "!trem1!", "!trem2!", "!trem3!", "!trem4!",
+        "!xstem!", "!slide!", "!turnx!", "!invertedturnx!",
+        "!arpeggio!", "!invertedturn!",
+        # Phrasing & fingering
+        "!shortphrase!", "!mediumphrase!", "!longphrase!",
+        "!upbow!", "!downbow!", "!thumb!", "!snap!",
+        "!turn!", "!roll!", "!breath!",
+        # Repeat/section
+        "!segno!", "!coda!", "!D.S.!", "!D.C.!",
+        "!dacoda!", "!dacapo!", "!fine!",
+        # Fingering numbers
+        "!0!", "!1!", "!2!", "!3!", "!4!", "!5!",
+        # Extra
+        "!plus!", "!wedge!", "!open!",
+        # Bare boundary (fallback)
+        "!",
+
+        # ── Short-form decorations ───────────────────────────────────
+        ".", "~",
+        "H", "L", "M", "P", "S", "T", "u", "v", "O", "J", "R",
+
+        # ── Chord symbol fragments ───────────────────────────────────
+        "maj", "min", "dim", "aug", "sus",
+        "m",    # minor shorthand
+        "+",    # augmented shorthand
+        "#",    # sharp in chord symbols (F#7, C#m)
+
+        # ── Dotted ties/slurs ────────────────────────────────────────
+        ".(", ".)",  ".-",
     ]
-    
-    # 4. Add them as special tokens so they are NEVER split by the tokenizer
+    # 2. Blank BPE with no merges — all tokenization is via special tokens
+    vocab_dict = {tok: i for i, tok in enumerate(abc_vocab)}
+    tokenizer = Tokenizer(BPE(vocab=vocab_dict, merges=[], unk_token="<unk>"))
+    tokenizer.pre_tokenizer = None  # special tokens handle all splitting
+
+    # 3. Register all as special tokens (never split by BPE)
     tokenizer.add_special_tokens(abc_vocab)
-    
-    # 5. Set up the standard BOS/EOS formatting for generation
+
+    # 4. BOS/EOS wrapping for generation
     tokenizer.post_processor = TemplateProcessing(
         single="<s> $A </s>",
         special_tokens=[
@@ -77,8 +119,7 @@ def build_abc_tokenizer():
             ("</s>", abc_vocab.index("</s>")),
         ],
     )
-    
-    # 6. Wrap it for HuggingFace Transformers
+
     hf_tokenizer = PreTrainedTokenizerFast(
         tokenizer_object=tokenizer,
         bos_token="<s>",
@@ -86,16 +127,61 @@ def build_abc_tokenizer():
         unk_token="<unk>",
         pad_token="<pad>",
     )
-    
-    hf_tokenizer.save_pretrained("./custom-abc-tokenizer")
-    print(f"Tokenizer built and saved! Vocabulary size: {len(hf_tokenizer)}")
+
+    if save_dir is not None:
+        hf_tokenizer.save_pretrained(save_dir)
+        print(f"Tokenizer saved to {save_dir}  |  vocab size: {len(hf_tokenizer)}")
+    else:
+        print(f"Tokenizer built dynamically |  vocab size: {len(hf_tokenizer)}")
+        
     return hf_tokenizer
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+#  Self-test
+# ═══════════════════════════════════════════════════════════════════════════
 
 if __name__ == "__main__":
     tk = build_abc_tokenizer()
-    
-    # Test it out to prove it perfectly isolates complex musical notation
-    test_str = "M:4/4 !mf! !diminuendo(! \"Am7\" !trill!^c'2 !>)! |] "
-    encoded = tk.tokenize(test_str)
-    print(f"Test string: {test_str}")
-    print(f"Tokens: {encoded}")
+
+    tests = [
+        # (input, expected_tokens)
+        ("M:4/4",          ["M:", "4/4"]),
+        ("K:G",            ["K:", "G"]),
+        ("K:AMix",         ["K:", "A", "Mix"]),
+        ("K:Bb",           ["K:", "Bb"]),
+        ("!mf!",           ["!mf!"]),
+        ("!trill!",        ["!trill!"]),
+        ("!diminuendo(!",  ["!diminuendo(!"]),
+        ("^^",             ["^^"]),
+        ("__",             ["__"]),
+        (",,",             [",,"]),
+        ("''",             ["''"]),
+        ("|]",             ["|]"]),
+        ("||",             ["||"]),
+        ("[1",             ["[1"]),
+    ]
+
+    print("\nTokenization tests:")
+    all_pass = True
+    for input_str, expected in tests:
+        actual = tk.tokenize(input_str)
+        status = "✓" if actual == expected else "✗"
+        if actual != expected:
+            all_pass = False
+        print(f"  {status} '{input_str}' → {actual}  (expected {expected})")
+
+    # Full-line test
+    line = '!mf! "Am7" !trill!^c\'2 |] '
+    tokens = tk.tokenize(line)
+    ids = tk.encode(line, add_special_tokens=False)
+    decoded = tk.decode(ids, skip_special_tokens=False)
+    print(f"\n  Full line: {repr(line)}")
+    print(f"  Tokens:    {tokens}")
+    print(f"  IDs:       {ids}")
+    print(f"  Decoded:   {repr(decoded)}")
+    unk_id = tk.unk_token_id
+    if unk_id in ids:
+        print(f"  ⚠ WARNING: <unk> found at positions {[i for i,x in enumerate(ids) if x == unk_id]}")
+    else:
+        print(f"  ✓ No <unk> tokens")

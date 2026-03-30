@@ -23,7 +23,7 @@ from tqdm import tqdm
 from gelato.model.models import GelatoModel, GelatoConfig
 from gelato.train.utils import get_tokenizer, load_checkpoint, GelatoDataCollator
 from gelato.train.dataset import GelatoDataset
-from gelato.model.static import STATICGrammarCompiler, STATICLogitsProcessor
+from gelato.model.static import ABCGrammarCompiler, ABCLogitsProcessor
 from gelato.metrics.error_rates import compute_error_rates
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
@@ -112,28 +112,28 @@ def run_eval(args):
 
     logits_processor = None
     if not args.no_static:
-        logger.info("Compiling STATIC CSR Grammar Tensor...")
-        compiler = STATICGrammarCompiler(tokenizer_name=args.text_model_name)
-        token_to_state, state_to_allowed = compiler.build_state_tensors(device="cuda")
-        static_processor = STATICLogitsProcessor(token_to_state, state_to_allowed)
+        logger.info("Compiling ABC CSR Grammar Tensor...")
+        compiler = ABCGrammarCompiler(tokenizer=tokenizer)
+        t2s, s2a, _ = compiler.build_state_tensors(device="cuda")
+        static_processor = ABCLogitsProcessor(t2s, s2a, tokenizer)
         logits_processor = LogitsProcessorList([static_processor])
 
     all_preds = []   # list of token-id lists
     all_labels = []  # list of token-id lists
 
     logger.info(f"Running evaluation on {len(dataset)} samples...")
-    model.config.engram = False
+    #model.config.engram = False
     pbar = tqdm(dataloader, desc="Evaluating", unit="batch")
     for batch in pbar:
         pixel_values = batch["pixel_values"].to(device)
         labels = batch["labels"]  # (B, seq_len), padding = -100
 
-        out = model(
-            pixel_values=pixel_values,
-            input_ids=batch["input_ids"].to(device),
-            labels=labels.to(device),
-        )
-        print(f"Loss WITHOUT Engram: {out.loss.item()}")
+        #out = model(
+        #    pixel_values=pixel_values,
+        #    input_ids=batch["input_ids"].to(device),
+        #    labels=labels.to(device),
+        #)
+        #print(f"Loss WITHOUT Engram: {out.loss.item()}")
 
         generated = model.generate(
             pixel_values=pixel_values,

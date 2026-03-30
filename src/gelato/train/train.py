@@ -24,7 +24,7 @@ from gelato.train.utils import get_tokenizer, load_checkpoint
 from gelato.train.dataset import GelatoDataset
 from gelato.train.utils import GelatoDataCollator
 
-from gelato.model.static import STATICGrammarCompiler, STATICLogitsProcessor
+from gelato.model.static import build_abc_logits_processor
 from gelato.train.trainer import GelatoSTATICTrainer # The custom trainer
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
@@ -219,10 +219,8 @@ def main():
         optim="adamw_8bit",
     )
 
-    logger.info("Compiling STATIC CSR Grammar Tensor...")
-    compiler = STATICGrammarCompiler(tokenizer_name=args.text_model_name)
-    token_to_state, state_to_allowed = compiler.build_state_tensors(device="cuda")
-    static_processor = STATICLogitsProcessor(token_to_state, state_to_allowed)
+    logger.info("Compiling ABC CSR Grammar Tensor...")
+    static_processor = build_abc_logits_processor(tokenizer, device="cuda")
 
     trainer = GelatoSTATICTrainer(
         model=model,
