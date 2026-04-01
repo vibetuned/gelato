@@ -16,10 +16,10 @@ class GelatoSTATICTrainer(Trainer):
 
         self.custom_sampler = custom_sampler
 
-    def _get_train_sampler(self):
+    def _get_train_sampler(self, *args, **kwargs):
         if self.custom_sampler is not None:
             return self.custom_sampler
-        return super()._get_train_sampler()
+        return super()._get_train_sampler(*args, **kwargs)
 
     def create_optimizer(self):
         """

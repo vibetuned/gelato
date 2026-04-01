@@ -28,6 +28,41 @@ import warnings
 warnings.filterwarnings("ignore", category=UserWarning)
 
 logger = logging.getLogger(__name__)
+
+# =============================================================================
+# Score Configuration (curriculum difficulty knobs)
+# =============================================================================
+
+SIMPLE_TIME_SIGNATURES = ["4/4", "3/4", "2/4"]
+MEDIUM_TIME_SIGNATURES = ["4/4", "3/4", "2/4", "6/8", "C", "cut"]
+ALL_TIME_SIGNATURES = [
+    "1/4", "2/4", "4/4", "6/8", "8/8", "C", "cut",
+    "16/8", "16/16", "16/12", "9/8", "12/8",
+]
+
+ALL_SCALE_TYPES = ["major", "harmonic_minor", "melodic_minor", "chromatic", "chord_progression"]
+SIMPLE_SCALE_TYPES = ["major", "chord_progression"]
+
+
+@dataclass
+class ScoreConfig:
+    """Controls complexity knobs for curriculum learning stages."""
+    num_voices: int = 2              # 1 = single staff (RH only), 2 = grand staff
+    fingerings: bool = True          # include fingering annotations
+    ornaments: bool = True           # include ornaments, articulations, arpeggio marks
+    dynamics: bool = True            # include dynamic markings
+    slurs: bool = True               # include slur spanners
+    ties: bool = True                # include ties
+    time_signatures: Optional[List[str]] = None   # None → use ALL_TIME_SIGNATURES
+    scale_types: Optional[List[str]] = None       # None → use ALL_SCALE_TYPES
+
+    def get_time_signatures(self) -> List[str]:
+        return self.time_signatures if self.time_signatures else ALL_TIME_SIGNATURES
+
+    def get_scale_types(self) -> List[str]:
+        return self.scale_types if self.scale_types else ALL_SCALE_TYPES
+
+
 # Classical 2-octave fingerings for major scales
 # Fingers: 1=thumb, 2=index, 3=middle, 4=ring, 5=pinky
 # RH = Right Hand (ascending), LH = Left Hand (ascending)
@@ -165,20 +200,7 @@ class ArpeggioPattern(Enum):
 # User starting keys
 STARTING_KEYS = ["C", "G", "D", "F", "Bb", "A", "E", "Eb", "Ab"]
 MINOR_STARTING_KEYS = ["A", "E", "B", "D", "G", "C", "F", "F#", "C#"]
-TIME_SIGNATURES = [
-    "1/4",
-    "2/4",
-    "4/4",
-    "6/8",
-    "8/8",
-    "C",
-    "cut",
-    "16/8",
-    "16/16",
-    "16/12",
-    "9/8",
-    "12/8",
-]
+TIME_SIGNATURES = ALL_TIME_SIGNATURES  # kept for backwards compatibility
 FAILING_ARTICULATIONS = [
     music21.articulations.Staccato,
     music21.articulations.Accent,
@@ -434,8 +456,10 @@ def _choose_note_duration(bar_length: float) -> float:
     return random.choices(durations, weights=wts, k=1)[0]
 
 
-def _inject_ornaments_on_note(note_obj: music21.note.Note, measure_idx: int):
+def _inject_ornaments_on_note(note_obj: music21.note.Note, measure_idx: int, cfg: "ScoreConfig" = None):
     """Randomly attach failing-class ornaments, articulations, and dynamics."""
+    if cfg is not None and not cfg.ornaments:
+        return
     # Ornaments (trill, mordent, turn) — keep rate moderate for scales
     if random.random() < 0.06:
         orn = random.choice(FAILING_ORNAMENTS)
@@ -447,8 +471,10 @@ def _inject_ornaments_on_note(note_obj: music21.note.Note, measure_idx: int):
         note_obj.articulations.append(art())
 
 
-def _inject_dynamics(measure: music21.stream.Measure, offset: float):
+def _inject_dynamics(measure: music21.stream.Measure, offset: float, cfg: "ScoreConfig" = None):
     """Inject a dynamic marking at the given offset."""
+    if cfg is not None and not cfg.dynamics:
+        return
     dyn_symbol = random.choice(FAILING_DYNAMICS)
     dyn = music21.dynamics.Dynamic(dyn_symbol)
     measure.insert(offset, dyn)
@@ -457,8 +483,11 @@ def _inject_dynamics(measure: music21.stream.Measure, offset: float):
 def _maybe_add_tie(
     prev_note: Optional[music21.note.Note],
     curr_note: music21.note.Note,
+    cfg: "ScoreConfig" = None,
 ) -> bool:
     """Randomly tie two adjacent notes of the same pitch. Returns True if tied."""
+    if cfg is not None and not cfg.ties:
+        return False
     if prev_note is None:
         return False
     if prev_note.pitch.midi != curr_note.pitch.midi:
@@ -476,6 +505,7 @@ def _build_measures_from_pitches(
     time_sig_str: str,
     key_obj: music21.key.Key,
     hand: str,
+    cfg: "ScoreConfig" = None,
 ) -> List[music21.stream.Measure]:
     """Pack scale pitches into measures with fingering, ornaments, and dynamics."""
     # Parse time signature to know beats per measure
@@ -501,17 +531,18 @@ def _build_measures_from_pitches(
 
     for i, (pitch, finger) in enumerate(zip(pitches, fingerings)):
         n = music21.note.Note(pitch, quarterLength=note_duration)
-        n.articulations.append(music21.articulations.Fingering(finger))
+        if cfg is None or cfg.fingerings:
+            n.articulations.append(music21.articulations.Fingering(finger))
 
         # Ornaments
-        _inject_ornaments_on_note(n, measure_count)
+        _inject_ornaments_on_note(n, measure_count, cfg)
 
         # Ties (at turning point of scale where same pitch repeats)
-        _maybe_add_tie(prev_note, n)
+        _maybe_add_tie(prev_note, n, cfg)
 
         # Dynamics at start of some measures
         if first_note_in_measure and random.random() < 0.20:
-            _inject_dynamics(current_measure, current_offset)
+            _inject_dynamics(current_measure, current_offset, cfg)
             first_note_in_measure = False
 
         # Check if note fits in current measure
@@ -524,7 +555,7 @@ def _build_measures_from_pitches(
             first_note_in_measure = True
 
             if first_note_in_measure and random.random() < 0.20:
-                _inject_dynamics(current_measure, 0.0)
+                _inject_dynamics(current_measure, 0.0, cfg)
                 first_note_in_measure = False
 
         current_measure.insert(current_offset, n)
@@ -541,8 +572,10 @@ def _build_measures_from_pitches(
     return measures
 
 
-def _add_slurs(part: music21.stream.Part, density: float = 0.15):
+def _add_slurs(part: music21.stream.Part, density: float = 0.15, cfg: "ScoreConfig" = None):
     """Add slur spanners over random groups of adjacent notes."""
+    if cfg is not None and not cfg.slurs:
+        return
     all_notes = [n for n in part.recurse().notes if not n.isRest]
     if len(all_notes) < 4:
         return
@@ -641,6 +674,7 @@ def _build_measures_from_chords(
     time_sig_str: str,
     key_obj: music21.key.Key,
     hand: str,
+    cfg: "ScoreConfig" = None,
 ) -> List[music21.stream.Measure]:
     """Pack a chord progression into measures with fingering, arpeggios, and ties."""
     ts = music21.meter.TimeSignature(time_sig_str)
@@ -667,18 +701,20 @@ def _build_measures_from_chords(
         c.quarterLength = chord_duration
 
         # Fingering on each note of the chord
-        fingers = _chord_fingering(c)
-        for pitch_obj, finger in zip(c.pitches, fingers):
-            c.articulations.append(music21.articulations.Fingering(finger))
+        if cfg is None or cfg.fingerings:
+            fingers = _chord_fingering(c)
+            for _, finger in zip(c.pitches, fingers):
+                c.articulations.append(music21.articulations.Fingering(finger))
 
-        # Arpeggio mark (~25%)
-        if random.random() < 0.25:
-            c.expressions.append(music21.expressions.ArpeggioMark())
+        if cfg is None or cfg.ornaments:
+            # Arpeggio mark (~25%)
+            if random.random() < 0.25:
+                c.expressions.append(music21.expressions.ArpeggioMark())
 
-        # Ornaments / articulations on the chord
-        if random.random() < 0.08:
-            art = random.choice(FAILING_ARTICULATIONS)
-            c.articulations.append(art())
+            # Articulations on the chord
+            if random.random() < 0.08:
+                art = random.choice(FAILING_ARTICULATIONS)
+                c.articulations.append(art())
 
         # New measure if needed — BEFORE tie logic to prevent cross-barline ties
         if current_offset + chord_duration > bar_length + 0.001:
@@ -689,18 +725,18 @@ def _build_measures_from_chords(
             first_in_measure = True
             prev_chord = None  # prevent ties across barlines
             if first_in_measure and random.random() < 0.20:
-                _inject_dynamics(current_measure, 0.0)
+                _inject_dynamics(current_measure, 0.0, cfg)
                 first_in_measure = False
 
         # Tie some repeated chords (~30%) — only within same measure
-        if prev_chord is not None and chord_name == getattr(prev_chord, '_cof_name', None):
+        if (cfg is None or cfg.ties) and prev_chord is not None and chord_name == getattr(prev_chord, '_cof_name', None):
             if random.random() < 0.30:
                 prev_chord.tie = music21.tie.Tie('start')
                 c.tie = music21.tie.Tie('stop')
 
         # Dynamics
         if first_in_measure and random.random() < 0.20:
-            _inject_dynamics(current_measure, current_offset)
+            _inject_dynamics(current_measure, current_offset, cfg)
             first_in_measure = False
 
         current_measure.insert(current_offset, c)
@@ -756,19 +792,19 @@ def _equalize_measures(
     return _repeat(rh_measures, final_target), _repeat(lh_measures, final_target)
 
 
-def generate_score(min_measures, max_measures):
+def generate_score(min_measures, max_measures, cfg: ScoreConfig = None):
     """Generate a piano score with scale exercises or chord progressions.
 
     Randomly picks one of: major, harmonic_minor, melodic_minor, chromatic,
-    or chord_progression. Creates a 2-staff piano layout (Treble RH + Bass LH).
+    or chord_progression. Creates a 1- or 2-staff piano layout controlled by cfg.
     Both parts are equalized to the same number of measures via LCM repetition.
     """
+    if cfg is None:
+        cfg = ScoreConfig()
+
     score = music21.stream.Score()
 
-    scale_type = random.choice([
-        "major", "harmonic_minor", "melodic_minor", "chromatic",
-        "chord_progression",
-    ])
+    scale_type = random.choice(cfg.get_scale_types())
 
     # Pick key based on scale type
     if scale_type in ("harmonic_minor", "melodic_minor"):
@@ -778,20 +814,22 @@ def generate_score(min_measures, max_measures):
         key_str = random.choice(STARTING_KEYS)
         key_obj = music21.key.Key(key_str)
 
-    time_sig_str = random.choice(TIME_SIGNATURES)
+    time_sig_str = random.choice(cfg.get_time_signatures())
 
-    # Build measures for both hands first
+    hands = ["RH", "LH"] if cfg.num_voices == 2 else ["RH"]
+
+    # Build measures per hand
     hands_measures: Dict[str, List[music21.stream.Measure]] = {}
 
     if scale_type == "chord_progression":
         num_chords = random.randint(8, 16)
         progression = _build_chord_progression(key_str, num_chords)
-        for hand in ["RH", "LH"]:
+        for hand in hands:
             hands_measures[hand] = _build_measures_from_chords(
-                progression, time_sig_str, key_obj, hand
+                progression, time_sig_str, key_obj, hand, cfg
             )
     else:
-        for hand in ["RH", "LH"]:
+        for hand in hands:
             if scale_type == "major":
                 pitches = _build_scale_pitches(key_obj, hand)
                 fing_key = _get_fingering_key(key_obj)
@@ -809,16 +847,17 @@ def generate_score(min_measures, max_measures):
                 fingerings = _get_chromatic_fingerings(pitches, hand)
 
             hands_measures[hand] = _build_measures_from_pitches(
-                pitches, fingerings, time_sig_str, key_obj, hand
+                pitches, fingerings, time_sig_str, key_obj, hand, cfg
             )
 
-    # Equalize lengths by repeating shorter part
-    hands_measures["RH"], hands_measures["LH"] = _equalize_measures(
-        hands_measures["RH"], hands_measures["LH"]
-    )
+    # Equalize lengths when using two hands
+    if cfg.num_voices == 2:
+        hands_measures["RH"], hands_measures["LH"] = _equalize_measures(
+            hands_measures["RH"], hands_measures["LH"]
+        )
 
     # Assemble parts
-    for hand in ["RH", "LH"]:
+    for hand in hands:
         part = music21.stream.Part()
         inst = music21.instrument.Piano()
         part.insert(0, inst)
@@ -826,7 +865,7 @@ def generate_score(min_measures, max_measures):
         for m in hands_measures[hand]:
             part.append(m)
 
-        _add_slurs(part)
+        _add_slurs(part, cfg=cfg)
 
         try:
             part = part.makeBeams(inPlace=False)
@@ -839,13 +878,13 @@ def generate_score(min_measures, max_measures):
 
 
 def process_file(args_tuple) -> bool:
-    file_idx, output_dir, min_m, max_m = args_tuple
+    file_idx, output_dir, min_m, max_m, cfg = args_tuple
     try:
         out_path = output_dir / f"synthetic_score_{file_idx:06d}.mxl"
         if out_path.exists():
             return True
-        
-        score = generate_score(min_m, max_m)
+
+        score = generate_score(min_m, max_m, cfg)
         # Collect intentional tie pairs BEFORE makeNotation mangles them.
         tie_pairs: list = []  # [(start_id, stop_id), ...]
         all_elements = list(score.recurse())
@@ -905,17 +944,43 @@ def main():
     parser.add_argument("num_files", type=int, help="Number of files to generate")
     parser.add_argument("--min_measures", type=int, default=12, help="Min measures per file")
     parser.add_argument("--max_measures", type=int, default=32, help="Max measures per file")
-    
+    # Curriculum difficulty knobs
+    parser.add_argument("--num_voices", type=int, default=2, choices=[1, 2],
+                        help="1 = single staff (RH only), 2 = grand staff (default)")
+    parser.add_argument("--no_fingerings", action="store_true", help="Omit fingering annotations")
+    parser.add_argument("--no_ornaments", action="store_true", help="Omit ornaments, articulations, and arpeggio marks")
+    parser.add_argument("--no_dynamics", action="store_true", help="Omit dynamic markings")
+    parser.add_argument("--no_slurs", action="store_true", help="Omit slur spanners")
+    parser.add_argument("--no_ties", action="store_true", help="Omit ties")
+    parser.add_argument("--time_sig_set", type=str, default="full", choices=["simple", "medium", "full"],
+                        help="Restrict time signatures: simple=4/4,3/4,2/4  medium=+6/8,C,cut  full=all")
+    parser.add_argument("--scale_types", type=str, nargs="+",
+                        choices=ALL_SCALE_TYPES, default=None,
+                        help="Restrict scale/content types (default: all)")
+
     args = parser.parse_args()
     output_path = Path(args.output_dir)
     output_path.mkdir(parents=True, exist_ok=True)
-    
+
+    time_sig_map = {"simple": SIMPLE_TIME_SIGNATURES, "medium": MEDIUM_TIME_SIGNATURES, "full": None}
+    cfg = ScoreConfig(
+        num_voices=args.num_voices,
+        fingerings=not args.no_fingerings,
+        ornaments=not args.no_ornaments,
+        dynamics=not args.no_dynamics,
+        slurs=not args.no_slurs,
+        ties=not args.no_ties,
+        time_signatures=time_sig_map[args.time_sig_set],
+        scale_types=args.scale_types,
+    )
+
     logger.info(f"Generating {args.num_files} synthetic files in {output_path}...")
-    
+    logger.info(f"Config: {cfg}")
+
     success_count = 0
     error_count = 0
-    
-    tasks = [(i, output_path, args.min_measures, args.max_measures) for i in range(args.num_files)]
+
+    tasks = [(i, output_path, args.min_measures, args.max_measures, cfg) for i in range(args.num_files)]
 
     with multiprocessing.Pool(
         processes=max(1, multiprocessing.cpu_count() - 1), maxtasksperchild=10

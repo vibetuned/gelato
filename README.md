@@ -55,3 +55,16 @@ uv pip install -r requirements.txt
     --gradient_checkpointing \
     --save_steps 500 \
     --max_seq_len 1024
+
+
+| Stage | hands | fingerings | ornaments | dynamics | slurs | ties | time sigs |
+
+|-------|-------|------------|-----------|----------|-------|------|-----------|
+
+| 3     | 1     | ✗          | ✗         | ✗        | ✗     | ✗    | simple    |
+
+| 4     | 1     | ✓          | ✗         | ✗        | ✗     | ✗    | medium    |
+
+| 5     | 2     | ✓          | ✗         | ✓        | ✓     | ✗    | medium    |
+
+| 6     | 2     | ✓          | ✓         | ✓        | ✓     | ✓    | full      |

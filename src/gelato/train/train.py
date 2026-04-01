@@ -193,6 +193,13 @@ def main():
     model = GelatoModel(model_config)
 
     # --- NEW WARM START LOADING LOGIC ---
+
+    if args.fine_tune:
+        logger.info(
+            f"Loading weights from {args.fine_tune} for fine-tuning (forcing CPU to save VRAM)..."
+        )
+        device = torch.device("cpu")
+        load_checkpoint(model, args.fine_tune, device=device, eval=False)
    
     for param in model.text_model.parameters():
         param.requires_grad = True
@@ -201,16 +208,17 @@ def main():
     for param in model.mm_projectors.parameters():
         param.requires_grad = True  
 
-    warm_start_path = Path(args.engram_warm_start)
-    if warm_start_path.exists():
-        logger.info(f"Loading Engram warm-start weights from {warm_start_path}...")
-        # Load the saved MultiHeadEmbedding state_dict
-        state_dict = torch.load(warm_start_path, map_location="cpu", weights_only=True)
-        # Inject it into Layer 1's Engram module
-        model.text_model.model.layers[1].multi_head_embedding.load_state_dict(state_dict)
-        logger.info("✅ Warm-start weights successfully injected!")
-    else:
-        logger.warning("⚠️ No warm-start weights found. Engram is using random noise!")
+    if args.engram_warm_start is not None:
+        warm_start_path = Path(args.engram_warm_start)
+        if warm_start_path.exists():
+            logger.info(f"Loading Engram warm-start weights from {warm_start_path}...")
+            # Load the saved MultiHeadEmbedding state_dict
+            state_dict = torch.load(warm_start_path, map_location="cpu", weights_only=True)
+            # Inject it into Layer 1's Engram module
+            model.text_model.model.layers[1].multi_head_embedding.load_state_dict(state_dict)
+            logger.info("✅ Warm-start weights successfully injected!")
+        else:
+            logger.warning("⚠️ No warm-start weights found. Engram is using random noise!")
     # ------------------------------------
 
     training_args = TrainingArguments(
