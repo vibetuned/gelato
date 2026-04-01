@@ -1,8 +1,19 @@
 # Data Configuration
-img_dir: "data/dataset-align/imgs"
-abc_dir: "data/dataset-align/abcs-strip"
+img_dir: "data/dataset-stage-2/imgs"
+abc_dir: "data/dataset-stage-2/abcs-strip"
 input_size: 640
 num_workers: 4
+
+# Data Mixture Configuration
+# mix_ratio: [main_ratio, mix1_ratio, ...] — first element anchors epoch length
+use_mix: true
+mix_ratio:
+  - 2
+  - 1
+mix_img_dir:
+  - "data/dataset-stage-1/imgs"
+mix_ann_dir:
+  - "data/dataset-stage-1/abcs-strip"
 
 # Model Configuration
 vision_model_name: "convnext_base.dinov3_lvd1689m"
@@ -12,7 +23,7 @@ vision_feature_dims:
   - 128
   - 256
   - 512
-engram_warm_start: "checkpoints/pretrain/engram_warm_start.pt"
+engram_warm_start: null
 
 # Low Memory Configuration
 visual_pool_size: 12
@@ -21,13 +32,13 @@ grad_accum_steps: 8
 mask_ratio: 0.5
 
 # Training Configuration
-phase: "alignment"
-fine_tune: null
+phase: "finetune"
+fine_tune: "checkpoints/run_001"
 output_dir: "checkpoints"
 logging_dir: "runs"
-epochs: 2
+epochs: 10
 batch_size: 4
-lr_projector: 0.0001
+lr_projector: 0.00005
 lr_text: 0.00002
 logging_steps: 50
 save_steps: 500

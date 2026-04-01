@@ -51,10 +51,15 @@ def parse_args():
     parser.add_argument("--num-workers", type=int, default=4)
     
     # Mixture Data args
-    parser.add_argument("--use-mix", action="store_true", help="Whether to mix a second dataset.")
-    parser.add_argument("--mix-ratio", type=int, default=1, help="Ratio for the mixture. >0 oversamples mix, <0 oversamples main.")
-    parser.add_argument("--mix-img-dir", type=str, default="data/dataset-align/imgs", help="Image directory for the mix dataset.")
-    parser.add_argument("--mix-ann-dir", type=str, default="data/dataset-align/abcs-strip", help="Annotations directory for the mix dataset.")
+    parser.add_argument("--use-mix", action="store_true", help="Whether to mix additional datasets.")
+    parser.add_argument("--mix-ratio", type=int, nargs='+', default=[2, 1],
+                        help="Ratios as a list: [main_ratio, mix1_ratio, mix2_ratio, ...]. "
+                             "First element is the main dataset ratio (anchor). Remaining elements "
+                             "correspond 1-to-1 with --mix-img-dir entries.")
+    parser.add_argument("--mix-img-dir", type=str, nargs='+', default=["data/dataset-align/imgs"],
+                        help="Image directories for mix datasets (one per entry).")
+    parser.add_argument("--mix-ann-dir", type=str, nargs='+', default=["data/dataset-align/abcs-strip"],
+                        help="Annotation directories for mix datasets (one per entry, must match --mix-img-dir).")
 
     # Model args
     parser.add_argument("--vision-model-name", type=str, default="convnext_base.dinov3_lvd1689m")
@@ -142,36 +147,42 @@ def main():
 
     custom_sampler = None
     if args.use_mix:
-        logger.info(f"Loading synthetic dataset with ratio 1:{args.mix_ratio}...")
-        mix_ds = GelatoDataset(
-            img_dir=args.mix_img_dir,
-            abc_dir=args.mix_ann_dir,
-            tokenizer=tokenizer,
-            input_size=args.input_size,
-        )
-        mix_subset = torch.utils.data.Subset(mix_ds, range(len(mix_ds)))
+        mix_img_dirs = args.mix_img_dir if isinstance(args.mix_img_dir, list) else [args.mix_img_dir]
+        mix_ann_dirs = args.mix_ann_dir if isinstance(args.mix_ann_dir, list) else [args.mix_ann_dir]
+        mix_ratios   = args.mix_ratio   if isinstance(args.mix_ratio,   list) else [abs(args.mix_ratio)]
 
-        if args.mix_ratio > 0:
-            train_dataset = torch.utils.data.ConcatDataset(
-                [mix_subset, train_dataset]
+        if len(mix_img_dirs) != len(mix_ann_dirs):
+            raise ValueError(
+                f"--mix-img-dir ({len(mix_img_dirs)} entries) and "
+                f"--mix-ann-dir ({len(mix_ann_dirs)} entries) must have the same length."
             )
-            dataset_lengths = [len(mix_ds), len(full_ds)]
-            ratios = [1, args.mix_ratio]
-            custom_sampler = RatioSampler(dataset_lengths, ratios)
-            logger.info(f"Using synthetic data with ratio 1:{args.mix_ratio}")
-
-        elif args.mix_ratio < 0:
-            train_dataset = torch.utils.data.ConcatDataset(
-                [train_dataset, mix_subset]
+        if len(mix_ratios) != len(mix_img_dirs) + 1:
+            raise ValueError(
+                f"--mix-ratio must have exactly len(--mix-img-dir)+1 entries "
+                f"(first entry = main dataset ratio). "
+                f"Got {len(mix_ratios)} ratio(s) for {len(mix_img_dirs)} mix dataset(s)."
             )
-            dataset_lengths = [len(full_ds), len(mix_ds)]
-            ratio = abs(args.mix_ratio)
-            ratios = [ratio, 1]
-            custom_sampler = RatioSampler(dataset_lengths, ratios)
-            logger.info(f"Using synthetic data with ratio {ratio}:1")
 
-        else:
-            logger.warning("Invalid synthetic ratio. Using real data only.")
+        all_subsets     = [train_dataset]
+        dataset_lengths = [len(full_ds)]
+        ratios          = [mix_ratios[0]]
+
+        for idx, (img_dir, ann_dir) in enumerate(zip(mix_img_dirs, mix_ann_dirs)):
+            ratio = mix_ratios[idx + 1]
+            logger.info(f"Loading mix dataset {idx + 1}/{len(mix_img_dirs)}: {img_dir}  ratio={ratio}")
+            mix_ds = GelatoDataset(
+                img_dir=img_dir,
+                abc_dir=ann_dir,
+                tokenizer=tokenizer,
+                input_size=args.input_size,
+            )
+            all_subsets.append(torch.utils.data.Subset(mix_ds, range(len(mix_ds))))
+            dataset_lengths.append(len(mix_ds))
+            ratios.append(ratio)
+
+        train_dataset  = torch.utils.data.ConcatDataset(all_subsets)
+        custom_sampler = RatioSampler(dataset_lengths, ratios)
+        logger.info(f"Dataset mixture — lengths: {dataset_lengths}  ratios: {ratios}")
 
     
     data_collator = GelatoDataCollator(

@@ -57,14 +57,19 @@ uv pip install -r requirements.txt
     --max_seq_len 1024
 
 
-| Stage | hands | fingerings | ornaments | dynamics | slurs | ties | time sigs |
+| Stage | hands | fingerings | ornaments | dynamics | slurs | ties | time sigs |      script       | parameters |
 
-|-------|-------|------------|-----------|----------|-------|------|-----------|
+|-------|-------|------------|-----------|----------|-------|------|-----------|-------------------|------------|
 
-| 3     | 1     | ✗          | ✗         | ✗        | ✗     | ✗    | simple    |
+| 1     | 1     | ✗          | ✗         | ✗        | ✗     | ✗    | simple    | easy-writer    | data/dataset-stage-1/mxls   50000   |
 
-| 4     | 1     | ✓          | ✗         | ✗        | ✗     | ✗    | medium    |
+| 2     | 1     | ✗          | ✗         | ✗        | ✗     | ✗    | simple    | inter-writer   | data/dataset-stage-2/mxls   25000   |
 
-| 5     | 2     | ✓          | ✗         | ✓        | ✓     | ✗    | medium    |
+| 3     | 1     | ✗          | ✗         | ✗        | ✗     | ✗    | simple    | synthetic-writer   | data/dataset-stage-3/mxls   40000   --num_voices 1 --no_fingerings --no_ornaments --no_dynamics --no_slurs --no_ties --time_sig_set simple --scale_types major chord_progression --min_measures 4 --max_measures 12 |
 
-| 6     | 2     | ✓          | ✓         | ✓        | ✓     | ✓    | full      |
+| 4     | 1     | ✓          | ✗         | ✗        | ✗     | ✗    | medium    | synthetic-writer  | data/dataset-stage-4/mxls   50000   --num_voices 1 --no_ornaments --no_dynamics --no_slurs --no_ties --time_sig_set medium --min_measures 6 --max_measures 16
+
+| 5     | 2     | ✓          | ✗         | ✓        | ✓     | ✗    | medium    | synthetic-writer | data/dataset-stage-5/mxls   80000   --no_ornaments --no_ties --time_sig_set medium --min_measures 8 --max_measures 20
+
+| 6     | 2     | ✓          | ✓         | ✓        | ✓     | ✓    | full      |synthetic-writer | data/dataset-stage-6/mxls   100000   --no_ornaments --no_ties --time_sig_set medium --min_measures 8 --max_measures 20
+
