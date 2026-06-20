@@ -81,6 +81,7 @@ def parse_args():
     parser.add_argument("--batch-size", type=int, default=4)
     parser.add_argument("--lr-projector", type=float, default=1e-4)
     parser.add_argument("--lr-text", type=float, default=2e-5)
+    parser.add_argument("--lr-vision", type=float, default=None, help="Learning rate for vision model. If None, vision model is frozen.")
     parser.add_argument("--logging-steps", type=int, default=50)
     parser.add_argument("--save-steps", type=int, default=500)
     parser.add_argument("--max-steps", type=int, default=-1)
@@ -218,6 +219,13 @@ def main():
     # Explicitly ensure the projectors remain unfrozen
     for param in model.mm_projectors.parameters():
         param.requires_grad = True  
+        
+    if args.lr_vision is not None:
+        for param in model.vision_model.parameters():
+            param.requires_grad = True
+    else:
+        for param in model.vision_model.parameters():
+            param.requires_grad = False
 
     if args.engram_warm_start is not None:
         warm_start_path = Path(args.engram_warm_start)
@@ -279,6 +287,7 @@ def main():
         static_processor=static_processor,
         lr_projector=args.lr_projector,
         lr_text=args.lr_text,
+        lr_vision=args.lr_vision,
         custom_sampler=custom_sampler,
     )
 

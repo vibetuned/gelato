@@ -17,11 +17,12 @@ dependencies = [
     "music21>=9.9.1",
     "numpy>=2.4.1",
     "pillow>=12.1.0",
+    "pyside6>=6.11.1",
     "sentencepiece>=0.2.1",
     "tensorboard>=2.20.0",
     "timm>=1.0.25",
-    "torch>=2.7.0",
-    "torchvision>=0.22.0",
+    "torch>=2.12.1",
+    "torchvision>=0.27.1",
     "transformers>=4.48.3",
     "verovio==6.0.1",
 ]
@@ -52,6 +53,8 @@ strip-abc = "gelato.dataset.strip_abc:main"
 easy-writer = "gelato.dataset.easy_writer:main"
 inter-writer = "gelato.dataset.inter_writer:main"
 synthetic-writer = "gelato.dataset.synthetic_writer:main"
+visualize-tokens = "gelato.dataset.visualize_tokens:main"
+visualize-states = "gelato.dataset.visualize_states:main"
 pretrain-gelato = "gelato.train.pretrain:main"
 train-gelato = "gelato.train.train:main"
 eval-gelato = "gelato.train.eval:main"

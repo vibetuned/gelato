@@ -51,9 +51,6 @@ class GelatoModel(PreTrainedModel, GenerationMixin):
             features_only=True,
             out_indices=(0, 1, 2)
         )
-        for param in self.vision_model.parameters():
-            param.requires_grad = False
-        self.vision_model.eval()
 
         # Adaptive pools: reduce each feature map to (visual_pool_size × visual_pool_size)
         # before flattening, so the visual token count is independent of input resolution (fix #6)
@@ -98,8 +95,9 @@ class GelatoModel(PreTrainedModel, GenerationMixin):
 
     def train(self, mode=True):
         super().train(mode)
-        # Keep vision encoder firmly in eval mode regardless of training state
-        self.vision_model.eval()
+        # Keep vision encoder firmly in eval mode regardless of training state if requires_grad is False
+        if not any(p.requires_grad for p in self.vision_model.parameters()):
+            self.vision_model.eval()
         return self
 
     def _extract_visual_features(self, pixel_values):

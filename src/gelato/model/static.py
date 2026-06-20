@@ -259,9 +259,13 @@ class ABCGrammarCompiler:
         #   (pitch letters serve as chord roots: C, D, Am, etc.)
         S[3, ids("chord_text", "pitch", "duration", "accidental")] = True
 
-        # State 4 — Inside chord text: continue chord or close quote
+        # State 4 — Inside chord text: continue chord or close quote.
+        #   bracket (']') also closes an inline field whose value is a flat/
+        #   sharp key (Bb, Eb, Ab, F#, C#) — those tokens are multi-role
+        #   (header_value + chord_text) and resolve to this state, so [K:Eb]
+        #   lands here before the ']'. (fix: stage-5 blocked ']' after Ab/Bb/Eb)
         S[4, ids("chord_text", "chord_quote", "pitch", "duration",
-                 "accidental")] = True
+                 "accidental", "bracket")] = True
 
         # State 5 — After opening ! (bare): expect decoration name
         # With the custom tokenizer this state is rarely reached because
@@ -274,8 +278,14 @@ class ABCGrammarCompiler:
         S[6, ids("dec_boundary")] = True
 
         # State 7 — After combined decoration (!trill!, !mf!, etc.):
-        #   can chain more decorations, or proceed to accid/pitch
-        S[7, ids("dec_combined", "dec_short", "accidental", "pitch")] = True
+        #   a decoration attaches to the FOLLOWING note-group, which may begin
+        #   with anything an idle position can — note, accidental, grace {,
+        #   chord ", bracket chord/field [, slur (, a barline, or whitespace —
+        #   and more decorations may be chained.  (fix: stage-4/5 blocked
+        #   space / '(' / '[' after !mf!, !sfz!, !5!, etc.)
+        S[7, ids("dec_combined", "dec_short", "accidental", "pitch",
+                 "idle", "barline", "grace_open", "chord_quote",
+                 "tie_slur", "bracket")] = True
 
         # State 8 — After short decoration (., ~, H, etc.): → accid or pitch
         S[8, ids("accidental", "pitch")] = True
@@ -309,13 +319,17 @@ class ABCGrammarCompiler:
 
         # State 15 — Header value (after M:, K:, etc.): allow header values,
         #   key names (pitch tokens), digits, accidentals, idle (newline ends it),
-        #   tie_slur (for negative numbers in transpose=-3)
+        #   tie_slur (for negative numbers in transpose=-3),
+        #   bracket (']' closes an INLINE information field like [K:D] / [M:2/2])
         S[15, ids("header_value", "pitch", "duration", "idle", "barline",
-                  "accidental", "tie_slur")] = True
+                  "accidental", "tie_slur", "bracket")] = True
 
-        # State 16 — Inside bracket chord [ceg]: pitches, accidentals,
-        #   durations, and close bracket
-        S[16, ids("pitch", "accidental", "duration", "octave", "bracket")] = True
+        # State 16 — Inside a '[' group, which is EITHER:
+        #   • a bracket chord [ceg] — pitches/accidentals/durations/octaves, or
+        #   • an inline information field [K:D] / [M:2/2] / [L:1/16], opened by
+        #     a header key (fix: stage-5 blocked K:/M: right after '[')
+        S[16, ids("pitch", "accidental", "duration", "octave", "bracket",
+                  "header_key")] = True
 
         # State 17 — UNCATEGORIZED: no transitions allowed (only EOS/PAD
         # from the block above). Any token that decodes to something not in
@@ -366,6 +380,7 @@ class ABCLogitsProcessor(LogitsProcessor):
         self._newline_id = _resolve('\n')
         self._bracket_open_id = _resolve('[')
         self._bracket_close_id = _resolve(']')
+        self._grace_open_id = _resolve('{')
         self._grace_close_id = _resolve('}')
 
         # Header key IDs — for sticky header-value state
@@ -389,6 +404,17 @@ class ABCLogitsProcessor(LogitsProcessor):
         # Count " tokens in the full sequence; odd count = inside chord
         quote_counts = (input_ids == self._quote_id).sum(dim=1)
         return (quote_counts % 2) == 1
+
+    def _is_inside_grace(self, input_ids: torch.LongTensor) -> torch.BoolTensor:
+        """Return a bool mask [batch] that is True where the sequence has an
+        unmatched opening '{' (i.e. we are inside a grace group). ABC grace
+        groups never nest, so a simple open>close count is exact."""
+        if self._grace_open_id is None or self._grace_close_id is None:
+            return torch.zeros(input_ids.size(0), dtype=torch.bool,
+                               device=input_ids.device)
+        opens = (input_ids == self._grace_open_id).sum(dim=1)
+        closes = (input_ids == self._grace_close_id).sum(dim=1)
+        return opens > closes
 
     def _is_in_header_line(self, input_ids: torch.LongTensor) -> torch.BoolTensor:
         """Return True where the most recent newline-or-BOS was followed by
@@ -423,16 +449,23 @@ class ABCLogitsProcessor(LogitsProcessor):
 
         return result
 
-    def __call__(self, input_ids: torch.LongTensor, scores: torch.FloatTensor) -> torch.FloatTensor:
-        batch_size = scores.size(0)
-        device = scores.device
-
+    def _last_tokens(self, input_ids: torch.LongTensor) -> torch.LongTensor:
+        """Per-row most-recent token (BOS for an empty prefix)."""
         if input_ids.shape[1] == 0:
-            last_tokens = torch.full((batch_size,), self.bos_token_id,
-                                     dtype=torch.long, device=device)
-        else:
-            last_tokens = input_ids[:, -1]
+            return torch.full((input_ids.size(0),), self.bos_token_id,
+                              dtype=torch.long, device=input_ids.device)
+        return input_ids[:, -1]
 
+    def effective_states(self, input_ids: torch.LongTensor) -> torch.LongTensor:
+        """Per-row grammar state [batch] AFTER the dynamic adjustments
+        (header / chord-symbol / chord-close / bracket-close).
+
+        This is the SINGLE SOURCE OF TRUTH for state derivation — both
+        __call__ and the state visualizer call it, so they can never drift.
+        """
+        device = input_ids.device
+        batch_size = input_ids.size(0)
+        last_tokens = self._last_tokens(input_ids)
         current_states = self.token_to_state[last_tokens].clone()
 
         # ── Dynamic state adjustments ─────────────────────────────────
@@ -450,7 +483,19 @@ class ABCLogitsProcessor(LogitsProcessor):
             sticky_mask = in_header & ~is_newline
             current_states[sticky_mask] = 15
 
-        # 2. Chord quote toggle: if last token is " and we're inside an open
+        # 2a. Chord-symbol stickiness: while inside an open " ... " chord
+        #    symbol, force chord-text state (4) so multi-token chords like
+        #    "Am7" / "F#dim" keep flowing after the root pitch — which would
+        #    otherwise drop us into after-pitch (state 10) and block 'm', '7'.
+        #    The opening " itself stays in chord_open (3); the closing " is
+        #    handled by the toggle below. (fix: "Am7" — wires in the
+        #    previously-unused _is_inside_chord_quote helper)
+        if self._quote_id is not None and input_ids.shape[1] > 0:
+            inside_chord = self._is_inside_chord_quote(input_ids)
+            not_quote = (last_tokens != self._quote_id)
+            current_states[inside_chord & not_quote] = 4
+
+        # 2b. Chord quote toggle: if last token is " and we're inside an open
         #    chord (odd number of " tokens seen), this " is CLOSING → state 14.
         #    This handles "C", "Am7", "F#dim" etc. regardless of the primary
         #    state of the tokens between the quotes.
@@ -470,13 +515,47 @@ class ABCLogitsProcessor(LogitsProcessor):
             bracket_close_mask = (last_tokens == self._bracket_close_id)
             prev_states = self.token_to_state[input_ids[:, -2]]
             closing_bracket = bracket_close_mask & (
-                prev_states.eq(9) | prev_states.eq(10) | prev_states.eq(11) |
-                prev_states.eq(12) | prev_states.eq(16)
+                prev_states.eq(4) | prev_states.eq(9) | prev_states.eq(10) |
+                prev_states.eq(11) | prev_states.eq(12) | prev_states.eq(15) |
+                prev_states.eq(16)
             )
             current_states[closing_bracket] = 10  # treat like after-pitch
 
-        # ── Apply mask ────────────────────────────────────────────────
+        return current_states
+
+    def allowed_mask(self, input_ids: torch.LongTensor,
+                     current_states: torch.LongTensor = None) -> torch.BoolTensor:
+        """Full-width [batch, vocab_size] mask of permitted next tokens,
+        including the grace-group '}' stickiness. Pass `current_states` to
+        reuse an earlier effective_states() result; otherwise it is computed.
+
+        Single source of truth for the allow/block decision — shared by
+        __call__ and the visualizer. Note: vocab-size reconciliation against
+        the logits width happens in __call__, not here.
+        """
+        if current_states is None:
+            current_states = self.effective_states(input_ids)
+
         valid_mask = self.state_to_allowed[current_states]
+
+        # 4. Grace stickiness: inside an open '{ ... }' grace group the closing
+        #    '}' is always legal, no matter which note-element state we landed
+        #    in (after pitch/octave/duration). Grace groups span multiple notes
+        #    like {gag} or {g'a}, so the close can't be baked into a single
+        #    state. (fix: multi-note grace self-test {gag}/{g}…)
+        if self._grace_close_id is not None and input_ids.shape[1] > 0:
+            inside_grace = self._is_inside_grace(input_ids)
+            if inside_grace.any():
+                valid_mask = valid_mask.clone()
+                valid_mask[inside_grace, self._grace_close_id] = True
+
+        return valid_mask
+
+    def __call__(self, input_ids: torch.LongTensor, scores: torch.FloatTensor) -> torch.FloatTensor:
+        batch_size = scores.size(0)
+        device = scores.device
+
+        valid_mask = self.allowed_mask(input_ids)
 
         # Handle vocab size mismatch
         vs_logits = scores.size(-1)

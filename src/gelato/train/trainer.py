@@ -3,7 +3,7 @@ from transformers import Trainer
 from transformers.generation.logits_process import LogitsProcessorList
 
 class GelatoSTATICTrainer(Trainer):
-    def __init__(self, *args, static_processor=None, lr_projector=1e-4, lr_text=2e-5, custom_sampler=None, **kwargs):
+    def __init__(self, *args, static_processor=None, lr_projector=1e-4, lr_text=2e-5, lr_vision=None, custom_sampler=None, **kwargs):
         super().__init__(*args, **kwargs)
         # Initialize the STATIC Bouncer
         self.static_processor = static_processor
@@ -13,6 +13,7 @@ class GelatoSTATICTrainer(Trainer):
         
         self.lr_projector = lr_projector
         self.lr_text = lr_text
+        self.lr_vision = lr_vision
 
         self.custom_sampler = custom_sampler
 
@@ -28,6 +29,7 @@ class GelatoSTATICTrainer(Trainer):
         if self.optimizer is None:
             projector_params = [p for p in self.model.mm_projectors.parameters() if p.requires_grad]
             text_params = [p for p in self.model.text_model.parameters() if p.requires_grad]
+            vision_params = [p for p in self.model.vision_model.parameters() if p.requires_grad]
             
             optimizer_cls = torch.optim.AdamW
             # HF TrainingArguments allows setting optim parameter
@@ -40,6 +42,8 @@ class GelatoSTATICTrainer(Trainer):
                 param_groups.append({"params": projector_params, "lr": self.lr_projector})
             if text_params:
                 param_groups.append({"params": text_params, "lr": self.lr_text})
+            if self.lr_vision is not None and vision_params:
+                param_groups.append({"params": vision_params, "lr": self.lr_vision})
                 
             weight_decay = self.args.weight_decay if self.args.weight_decay > 0 else 0.01
             

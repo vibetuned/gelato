@@ -532,7 +532,8 @@ def _build_measures_from_pitches(
     for i, (pitch, finger) in enumerate(zip(pitches, fingerings)):
         n = music21.note.Note(pitch, quarterLength=note_duration)
         if cfg is None or cfg.fingerings:
-            n.articulations.append(music21.articulations.Fingering(finger))
+            if random.random() < 0.50:
+                n.articulations.append(music21.articulations.Fingering(finger))
 
         # Ornaments
         _inject_ornaments_on_note(n, measure_count, cfg)
@@ -704,7 +705,8 @@ def _build_measures_from_chords(
         if cfg is None or cfg.fingerings:
             fingers = _chord_fingering(c)
             for _, finger in zip(c.pitches, fingers):
-                c.articulations.append(music21.articulations.Fingering(finger))
+                if random.random() < 0.50:
+                    c.articulations.append(music21.articulations.Fingering(finger))
 
         if cfg is None or cfg.ornaments:
             # Arpeggio mark (~25%)
@@ -801,6 +803,12 @@ def generate_score(min_measures, max_measures, cfg: ScoreConfig = None):
     """
     if cfg is None:
         cfg = ScoreConfig()
+    else:
+        cfg = copy.copy(cfg)
+
+    # Only apply fingerings to 20% of generated scores
+    if cfg.fingerings:
+        cfg.fingerings = (random.random() < 0.20)
 
     score = music21.stream.Score()
 

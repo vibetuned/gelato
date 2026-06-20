@@ -1,6 +1,6 @@
 # Data Configuration — primary dataset
-img_dir: "data/dataset-stage-4/imgs"
-abc_dir: "data/dataset-stage-4/abcs-strip"
+img_dir: "data/dataset-stage-5/imgs"
+abc_dir: "data/dataset-stage-5/abcs-strip"
 input_size: 640
 num_workers: 4
 
@@ -9,15 +9,18 @@ num_workers: 4
 # Here: 2 samples from main for every 1 from dataset-inter and 1 from dataset-align
 use_mix: true
 mix_ratio:
-  - 5
+  - 8
+  - 1
   - 1
   - 1
   - 1
 mix_img_dir:
+  - "data/dataset-stage-4/imgs"
   - "data/dataset-stage-3/imgs"
   - "data/dataset-stage-2/imgs"
   - "data/dataset-stage-1/imgs"
 mix_ann_dir:
+  - "data/dataset-stage-4/abcs-strip"
   - "data/dataset-stage-3/abcs-strip"
   - "data/dataset-stage-2/abcs-strip"
   - "data/dataset-stage-1/abcs-strip"
@@ -36,11 +39,11 @@ engram_warm_start: null
 visual_pool_size: 12
 max_seq_len: 768
 grad_accum_steps: 8
-mask_ratio: 0.5
+mask_ratio: 0.3
 
 # Training Configuration
 phase: "finetune"
-fine_tune: "checkpoints/run_003"
+fine_tune: "checkpoints/run_004"
 output_dir: "checkpoints"
 logging_dir: "runs"
 epochs: 4

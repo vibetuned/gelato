@@ -160,8 +160,8 @@ def run_eval(args):
             pred = [t for t in pred if t not in (bos_id, eos_id, pad_id)]
             
             # -------------------------
-            logger.info(f"Ref: {tokenizer.decode(ref)}")
-            logger.info(f"Pred: {tokenizer.decode(pred)}")
+            # logger.info(f"Ref: {tokenizer.decode(ref)}")
+            # logger.info(f"Pred: {tokenizer.decode(pred)}")
             
             all_labels.append(ref)
             all_preds.append(pred)
